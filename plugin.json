@@ -12,14 +12,14 @@
     "all"
   ],
   "displayName": {
-    "default": "siyuan-plugin-cfbed",
+    "default": "CloudFlare ImgBed",
     "en_US": "CloudFlare ImgBed",
     "zh_CN": "CloudFlare 图床管理"
   },
   "description": {
     "default": "CloudFlare ImgBed manager for SiYuan",
-    "en_US": "Scan, classify, upload and replace note images with multiple CloudFlare-ImgBed configs.",
-    "zh_CN": "扫描当前笔记及子笔记图片，按域名分类，支持多个 CloudFlare-ImgBed 配置并批量上传替换。"
+    "en_US": "Scan, classify, upload and replace images in the current note with multiple CloudFlare-ImgBed configs.",
+    "zh_CN": "扫描当前笔记图片，按域名分类，支持多个 CloudFlare-ImgBed 配置并批量上传替换。"
   },
   "readme": {
     "default": "README.md",
@@ -29,5 +29,10 @@
   "funding": {
     "custom": []
   },
-  "keywords": []
+  "keywords": [
+    "cloudflare-imgbed",
+    "cfbed",
+    "image",
+    "upload"
+  ]
 }
