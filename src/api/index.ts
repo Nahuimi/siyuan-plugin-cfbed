@@ -211,24 +211,30 @@ export async function sql<T = any>(stmt: string): Promise<T[]> {
   return await requestSiyuan<T[]>('/api/query/sql', { stmt })
 }
 
-export async function queryAssetReferences(assetUrl: string, limit = 50): Promise<ImageReferenceItem[]> {
+function getAssetReferenceCandidates(assetUrl: string): string[] {
   const normalized = String(assetUrl || '').trim().replace(/^\/+/, '')
   const fileName = normalized.split('/').pop() || normalized
-  const candidates = Array.from(new Set([
+
+  return Array.from(new Set([
     normalized,
     normalized.startsWith('assets/') ? `/${normalized}` : '',
     fileName ? `assets/${fileName}` : '',
     fileName ? `/assets/${fileName}` : '',
   ].filter(Boolean)))
+}
+
+export async function queryAssetReferences(assetUrl: string, limit = 50): Promise<ImageReferenceItem[]> {
+  const candidates = getAssetReferenceCandidates(assetUrl)
 
   if (!candidates.length) {
     return []
   }
 
   const stmt = `
-    select id, root_id, box, path, hpath, markdown, content
+    select id, root_id, box, path, hpath, type, markdown, content
     from blocks
-    where ${candidates.map(item => `markdown like '%${escapeSql(item)}%'`).join(' or ')}
+    where type != 'd'
+      and (${candidates.map(item => `(markdown like '%${escapeSql(item)}%' or content like '%${escapeSql(item)}%')`).join(' or ')})
     order by updated desc
     limit ${Math.max(1, Math.min(200, limit))}
   `
@@ -244,6 +250,87 @@ export async function queryAssetReferences(assetUrl: string, limit = 50): Promis
     content: row.content || '',
     originalUrl: assetUrl,
   }))
+}
+
+export async function queryAssetReferencesBatch(assetUrls: string[], limitPerAsset = 50): Promise<Record<string, ImageReferenceItem[]>> {
+  const normalizedUrls = Array.from(new Set(assetUrls.map(item => String(item || '').trim()).filter(Boolean)))
+  const candidateMap = new Map<string, string[]>()
+  const allCandidates = new Set<string>()
+
+  for (const assetUrl of normalizedUrls) {
+    const candidates = getAssetReferenceCandidates(assetUrl)
+    if (!candidates.length)
+      continue
+
+    candidateMap.set(assetUrl, candidates)
+    for (const candidate of candidates) {
+      allCandidates.add(candidate)
+    }
+  }
+
+  const result: Record<string, ImageReferenceItem[]> = {}
+  for (const assetUrl of normalizedUrls) {
+    result[assetUrl] = []
+  }
+
+  if (!allCandidates.size) {
+    return result
+  }
+
+  const allRows: BlockRow[] = []
+  const candidatesList = Array.from(allCandidates)
+  const chunkSize = 40
+
+  for (let i = 0; i < candidatesList.length; i += chunkSize) {
+    const chunk = candidatesList.slice(i, i + chunkSize)
+    const stmt = `
+      select id, root_id, box, path, hpath, type, markdown, content
+      from blocks
+      where type != 'd'
+        and (${chunk.map(item => `(markdown like '%${escapeSql(item)}%' or content like '%${escapeSql(item)}%')`).join(' or ')})
+      order by updated desc
+      limit ${Math.max(200, Math.min(2000, normalizedUrls.length * Math.max(1, limitPerAsset) * 3))}
+    `
+
+    const rows = await sql<BlockRow>(stmt)
+    allRows.push(...(rows || []))
+  }
+
+  const seenByAsset = new Map<string, Set<string>>()
+  for (const assetUrl of normalizedUrls) {
+    seenByAsset.set(assetUrl, new Set())
+  }
+
+  for (const row of allRows) {
+    const text = `${row.markdown || ''}\n${row.content || ''}`
+    for (const assetUrl of normalizedUrls) {
+      const refs = result[assetUrl]
+      if (refs.length >= Math.max(1, limitPerAsset))
+        continue
+
+      const candidates = candidateMap.get(assetUrl) || []
+      if (!candidates.some(candidate => text.includes(candidate)))
+        continue
+
+      const seen = seenByAsset.get(assetUrl)!
+      if (seen.has(row.id))
+        continue
+
+      seen.add(row.id)
+      refs.push({
+        blockId: row.id,
+        rootId: row.root_id || '',
+        box: row.box || '',
+        path: row.path || '',
+        hpath: row.hpath || '',
+        markdown: row.markdown || '',
+        content: row.content || '',
+        originalUrl: assetUrl,
+      })
+    }
+  }
+
+  return result
 }
 
 /**

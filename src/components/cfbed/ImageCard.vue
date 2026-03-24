@@ -5,7 +5,7 @@
       <button
         class="ref-count"
         :class="{ 'ref-count--active': docsExpanded }"
-        :title="docsExpanded ? '关闭引用窗口' : '查看引用内容'"
+        :title="item.referencesLoading ? '正在刷新引用数' : (docsExpanded ? '关闭引用窗口' : '查看引用内容')"
         @click.stop="docsExpanded = !docsExpanded"
       >
         <span class="ref-count__value">{{ item.referenceCount || 0 }}</span>
@@ -196,10 +196,14 @@ function openReference(doc: ImageReferenceItem) {
       return
     }
 
+    const targetId = doc.blockId.startsWith('fallback:')
+      ? doc.rootId
+      : doc.blockId
+
     openTab({
       app: plugin.app,
       doc: {
-        id: doc.blockId,
+        id: targetId,
         action: ['cb-get-focus', 'cb-get-hl'],
         zoomIn: false,
       },
@@ -214,6 +218,19 @@ function openReference(doc: ImageReferenceItem) {
   }
 }
 
+function createFallbackReferences(item: Pick<ImageItem, 'docs' | 'url'>): ImageReferenceItem[] {
+  return item.docs.map((doc, index) => ({
+    blockId: `fallback:${doc.docId}:${index}`,
+    rootId: doc.docId,
+    box: '',
+    path: doc.docPath,
+    hpath: doc.docHPath,
+    markdown: doc.originalUrl,
+    content: doc.originalUrl,
+    originalUrl: doc.originalUrl || item.url,
+  }))
+}
+
 watch(docsExpanded, (value) => {
   if (!value)
     return
@@ -224,12 +241,14 @@ watch(docsExpanded, (value) => {
   props.item.referencesLoading = true
   queryAssetReferences(props.item.url)
     .then((rows) => {
-      props.item.references = rows
-      props.item.referenceCount = rows.length
+      const fallbackReferences = createFallbackReferences(props.item)
+      props.item.references = rows.length ? rows : fallbackReferences
+      props.item.referenceCount = Math.max(rows.length, fallbackReferences.length)
     })
     .catch(() => {
-      props.item.references = []
-      props.item.referenceCount = 0
+      const fallbackReferences = createFallbackReferences(props.item)
+      props.item.references = fallbackReferences
+      props.item.referenceCount = fallbackReferences.length
       showMessage('查找引用失败')
     })
     .finally(() => {

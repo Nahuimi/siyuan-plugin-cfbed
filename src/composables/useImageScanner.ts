@@ -1,10 +1,23 @@
 import { computed, ref } from 'vue'
 import { pushErrMsg, updateDocContent } from '@/api'
-import { getCurrentDocs, queryAssetReferences } from '@/api/index'
+import { getCurrentDocs, queryAssetReferences, queryAssetReferencesBatch } from '@/api/index'
 import { extractMarkdownImages, detectImageSourceType, getDomainFromUrl, isImageLikeUrl } from '@/utils/image'
 import { replaceAllOccurrences } from '@/utils/replace'
 import { canImageBeReplaced } from '@/utils/replace'
-import type { ImageItem } from '@/types/plugin'
+import type { ImageItem, ImageReferenceItem } from '@/types/plugin'
+
+function createFallbackReferences(item: Pick<ImageItem, 'docs' | 'url'>): ImageReferenceItem[] {
+  return item.docs.map((doc, index) => ({
+    blockId: `fallback:${doc.docId}:${index}`,
+    rootId: doc.docId,
+    box: '',
+    path: doc.docPath,
+    hpath: doc.docHPath,
+    markdown: doc.originalUrl,
+    content: doc.originalUrl,
+    originalUrl: doc.originalUrl || item.url,
+  }))
+}
 
 export function useImageScanner(
   ownDomains: { value: string[] },
@@ -42,9 +55,9 @@ export function useImageScanner(
 
   async function refreshImages() {
     const currentVersion = ++refreshVersion
+    const previousImageMap = new Map(images.value.map(item => [item.url, item]))
 
     try {
-      const previousImageMap = new Map(images.value.map(item => [item.url, item]))
       const docs = await getCurrentDocs()
 
       if (currentVersion !== refreshVersion)
@@ -89,7 +102,7 @@ export function useImageScanner(
             ],
             references: previous?.references || [],
             referenceCount: previous?.referenceCount || 0,
-            referencesLoading: false,
+            referencesLoading: true,
             selected: false,
             status: findMappedUrl?.(url) ? 'success' : 'idle',
             message: '',
@@ -105,30 +118,29 @@ export function useImageScanner(
       if (currentVersion !== refreshVersion)
         return
 
-      images.value = nextImages
-
-      await Promise.allSettled(nextImages.map(async (item) => {
-        item.referencesLoading = true
-        const previousCount = item.referenceCount || 0
-        const previousReferences = item.references || []
-        try {
-          const rows = await queryAssetReferences(item.url)
-          item.references = rows
-          item.referenceCount = rows.length
-        }
-        catch {
-          item.references = previousReferences
-          item.referenceCount = previousCount
-        }
-        finally {
+      try {
+        const referenceMap = await queryAssetReferencesBatch(nextImages.map(item => item.url))
+        for (const item of nextImages) {
+          const rows = referenceMap[item.url] || []
+          const fallbackReferences = createFallbackReferences(item)
+          item.references = rows.length ? rows : fallbackReferences
+          item.referenceCount = rows.length || fallbackReferences.length
           item.referencesLoading = false
         }
-      }))
+      }
+      catch {
+        for (const item of nextImages) {
+          const previous = previousImageMap.get(item.url)
+          item.references = previous?.references || []
+          item.referenceCount = previous?.referenceCount || 0
+          item.referencesLoading = false
+        }
+      }
 
       if (currentVersion !== refreshVersion)
         return
 
-      images.value = [...nextImages]
+      images.value = nextImages
     }
     catch (error: any) {
       pushErrMsg(error?.message || '扫描图片失败')
