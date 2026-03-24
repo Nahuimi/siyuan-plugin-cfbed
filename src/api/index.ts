@@ -39,6 +39,51 @@ function normalizeApiPath(path: string) {
   return path.startsWith('/') ? path : `/${path}`
 }
 
+function getCurrentDocIdFromDom(): string {
+  const selectors = [
+    '.layout__wnd--active .protyle:not(.fn__none) .protyle-background',
+    '.layout__wnd--active .protyle:not(.fn__none) [data-node-id]',
+    '.protyle:not(.fn__none) .protyle-background',
+    '.protyle:not(.fn__none) [data-node-id]',
+  ]
+
+  for (const selector of selectors) {
+    const el = document.querySelector(selector)
+    const id = el?.getAttribute('data-node-id') || ''
+    if (id)
+      return id
+  }
+
+  return ''
+}
+
+function getRootIdFromLayoutItem(item: any): string {
+  if (!item)
+    return ''
+
+  const modelRootID = item?.model?.editor?.protyle?.block?.rootID
+  if (modelRootID)
+    return modelRootID
+
+  const itemRootID = item?.editor?.protyle?.block?.rootID
+  if (itemRootID)
+    return itemRootID
+
+  const headElement = item?.headElement as HTMLElement | undefined
+  if (headElement?.classList?.contains('item--focus') || headElement?.classList?.contains('item--active')) {
+    return modelRootID || itemRootID || ''
+  }
+
+  const children = item?.children || []
+  for (const child of children) {
+    const childRootID = getRootIdFromLayoutItem(child)
+    if (childRootID)
+      return childRootID
+  }
+
+  return ''
+}
+
 /**
  * petal / 插件环境统一请求入口
  * 思源后端 API 规范：POST + JSON，返回 { code, msg, data } [5]
@@ -131,14 +176,18 @@ export function getCurrentDocIdFromLayout(): string {
   catch {}
 
   try {
+    const domRootID = getCurrentDocIdFromDom()
+    if (domRootID)
+      return domRootID
+  }
+  catch {}
+
+  try {
     const centerChildren = win?.siyuan?.layout?.centerLayout?.children || []
     for (const layout of centerChildren) {
-      const children = layout?.children || []
-      for (const child of children) {
-        const rootID = child?.model?.editor?.protyle?.block?.rootID
-        if (rootID)
-          return rootID
-      }
+      const rootID = getRootIdFromLayoutItem(layout)
+      if (rootID)
+        return rootID
     }
   }
   catch {}
