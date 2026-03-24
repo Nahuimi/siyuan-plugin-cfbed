@@ -20,17 +20,32 @@ export interface ImageOccurrence {
   originalUrl: string
 }
 
+export interface ImageReferenceItem {
+  blockId: string
+  rootId: string
+  box: string
+  path: string
+  hpath: string
+  markdown: string
+  content: string
+  originalUrl: string
+}
+
 export interface ImageItem {
   id: string
   url: string
   domain: string
   sourceType: ImageSourceType
   docs: ImageOccurrence[]
+  references?: ImageReferenceItem[]
+  referenceCount?: number
+  referencesLoading?: boolean
   selected: boolean
   status?: UploadStatus
   message?: string
   uploadedUrl?: string
   progress?: number
+  replacePreviewExcluded?: boolean
 }
 
 export interface DocInfo {
@@ -61,6 +76,7 @@ export interface CfBedConfig {
 export interface PluginSettings {
   activeConfigId: string
   autoReplace: boolean
+  themeMode: 'auto' | 'light' | 'dark'
   ownDomainsText: string
   configs: CfBedConfig[]
 }
@@ -83,15 +99,6 @@ export interface UploadMappingItem {
   imageId?: string
   status: 'success' | 'error' | 'cancelled'
   time: string
-}
-
-export interface ReplacePreviewItem {
-  imageId: string
-  oldUrl: string
-  newUrl: string
-  docId: string
-  docPath: string
-  docHPath: string
 }
 
 export interface ConfigTestResult {

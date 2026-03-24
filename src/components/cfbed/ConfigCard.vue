@@ -79,13 +79,13 @@
           <SySelect class="field-row__control" :model-value="config.returnFormat" :options="returnFormatOptions" @update:modelValue="updateField('returnFormat', $event)" />
         </label>
 
-        <label class="field field-row">
+        <label v-if="showChunkSize" class="field field-row">
           <span class="field-row__label">分块大小（MB）</span>
           <SyInput class="field-row__control" :model-value="config.chunkSizeMB" type="number" min="1" @update:modelValue="updateField('chunkSizeMB', Number($event))" />
         </label>
       </div>
 
-      <div class="config-inline-options">
+      <div v-if="showServerCompress" class="config-inline-options">
         <button
           type="button"
           class="toggle-chip toggle-chip--wide"
@@ -140,6 +140,9 @@ const returnFormatOptions = [
   { value: 'default', text: '默认' },
   { value: 'full', text: '完整链接' },
 ]
+
+const showChunkSize = computed(() => ['telegram', 'discord'].includes(props.config.uploadChannel))
+const showServerCompress = computed(() => props.config.uploadChannel === 'telegram')
 
 function uploadChannelLabel(channel: string) {
   return uploadChannelOptions.find(item => item.value === channel)?.text || channel

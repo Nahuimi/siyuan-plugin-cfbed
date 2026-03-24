@@ -8,7 +8,7 @@
         :title="docsExpanded ? '关闭引用窗口' : '查看引用内容'"
         @click.stop="docsExpanded = !docsExpanded"
       >
-        <span class="ref-count__value">{{ item.docs?.length || 0 }}</span>
+        <span class="ref-count__value">{{ item.referenceCount || 0 }}</span>
       </button>
     </div>
 
@@ -23,15 +23,12 @@
       <div class="progress-bar__inner" :style="{ width: `${item.progress || 0}%` }" />
     </div>
 
-    <div v-if="typeof item.progress === 'number' && item.status !== 'idle'" class="minor-text">
-      进度：{{ item.progress || 0 }}%
-    </div>
-
     <div class="toolbar-row wrap toolbar-row--panel image-toolbar" @click.stop>
       <button class="image-action image-action--compact" @click="copyText(item.url)">原链接</button>
       <button
         v-if="item.sourceType !== 'own' && item.status !== 'uploading' && item.status !== 'preparing' && item.status !== 'queued'"
         class="image-action image-action--compact"
+        :class="{ 'image-action--success': item.status === 'success' && !!item.uploadedUrl }"
         @click="$emit('retry', item)"
       >
         {{ item.status === 'error' || item.status === 'cancelled' ? '重传' : '上传' }}
@@ -46,56 +43,102 @@
       </button>
     </div>
 
-    <div v-if="docsExpanded && item.docs?.length" class="ref-dialog" @click.stop>
+    <div v-if="replacePreviewActive && item.uploadedUrl && !item.replacePreviewExcluded" class="ref-dialog ref-dialog--replace" @click.stop>
+      <div class="ref-dialog__panel premium-card">
+        <div class="ref-dialog__head">
+          <div class="ref-dialog__title-wrap">
+            <div class="ref-dialog__title">替换预览</div>
+            <div class="ref-dialog__subtitle">共 {{ item.docs.length }} 处待替换</div>
+          </div>
+        </div>
+
+        <div class="ref-dialog__list ref-dialog__list--replace">
+          <div
+            v-for="doc in item.docs"
+            :key="`${item.id}-${doc.docId}-${doc.originalUrl}`"
+            class="ref-dialog__item ref-dialog__item--replace"
+          >
+            <div class="ref-dialog__main ref-dialog__main--replace">
+              <div class="ref-dialog__path">{{ doc.docHPath || doc.docPath || doc.docId }}</div>
+              <div class="replace-link-pair">
+                <div class="replace-link-pair__label">原链接</div>
+                <div class="replace-link-pair__value">{{ doc.originalUrl || item.url }}</div>
+              </div>
+              <div class="replace-link-pair replace-link-pair--next">
+                <div class="replace-link-pair__label">替换为</div>
+                <div class="replace-link-pair__value">{{ item.uploadedUrl }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="toolbar-row wrap toolbar-row--panel replace-action-row">
+          <button class="image-action image-action--compact image-action--danger" @click="$emit('cancel-replace', item)">取消</button>
+          <button class="image-action image-action--compact image-action--success" @click="$emit('confirm-replace', item)">确认替换</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="docsExpanded" class="ref-dialog" @click.stop>
       <div class="ref-dialog__mask" @click="docsExpanded = false" />
       <div class="ref-dialog__panel premium-card">
         <div class="ref-dialog__head">
           <div class="ref-dialog__title-wrap">
             <div class="ref-dialog__title">引用内容</div>
-            <div class="ref-dialog__subtitle">共 {{ item.docs.length }} 条引用</div>
+            <div class="ref-dialog__subtitle">共 {{ item.referenceCount || 0 }} 条引用</div>
           </div>
           <button class="ref-dialog__icon-btn" title="关闭" @click="closeDocs">
             <span aria-hidden="true">✕</span>
           </button>
         </div>
 
-        <div class="ref-dialog__list">
+        <div v-if="item.referencesLoading" class="minor-text">正在查找引用…</div>
+
+        <div v-else-if="!item.references?.length" class="minor-text">未找到引用</div>
+
+        <div v-else class="ref-dialog__list">
           <div
-            v-for="doc in item.docs"
-            :key="`${doc.docId}-${doc.originalUrl}`"
+            v-for="doc in item.references"
+            :key="doc.blockId"
             class="ref-dialog__item"
+            role="button"
+            tabindex="0"
+            title="点击跳转到引用块"
+            @click="openReference(doc)"
+            @keydown.enter.prevent="openReference(doc)"
+            @keydown.space.prevent="openReference(doc)"
           >
             <div class="ref-dialog__main">
-              <div class="ref-dialog__path">{{ doc.docHPath || doc.docPath || doc.docId }}</div>
-              <div class="ref-dialog__content">{{ doc.originalUrl }}</div>
+              <div class="ref-dialog__path">{{ doc.hpath || doc.path || doc.rootId || doc.blockId }}</div>
+              <div class="ref-dialog__content">{{ doc.markdown || doc.content || doc.originalUrl }}</div>
             </div>
-            <button class="ref-dialog__icon-btn ref-dialog__copy" title="复制" @click="copyReference(doc)">
+            <button class="ref-dialog__icon-btn ref-dialog__copy" title="复制" @click.stop="copyReference(doc)">
               <span aria-hidden="true">⧉</span>
             </button>
           </div>
         </div>
       </div>
     </div>
-
-    <div v-if="item.uploadedUrl" class="success-box">
-      <div class="success-box__label">上传结果</div>
-      <div class="success-box__value">{{ item.uploadedUrl }}</div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
-import { showMessage } from 'siyuan'
-import type { ImageItem, ImageSourceType } from '@/types/plugin'
+import { openTab, showMessage } from 'siyuan'
+import { queryAssetReferences } from '@/api/index'
+import { usePlugin } from '@/main'
+import type { ImageItem, ImageReferenceItem, ImageSourceType } from '@/types/plugin'
 
 const props = defineProps<{
   item: ImageItem
+  replacePreviewActive?: boolean
 }>()
 
 defineEmits<{
   (e: 'retry', item: ImageItem): void
   (e: 'cancel', imageId: string): void
+  (e: 'confirm-replace', item: ImageItem): void
+  (e: 'cancel-replace', item: ImageItem): void
 }>()
 
 const docsExpanded = defineModel<boolean>('docsExpanded', { default: false })
@@ -141,13 +184,57 @@ async function copyText(text: string) {
   }
 }
 
-function copyReference(doc: ImageItem['docs'][number]) {
-  copyText(`${doc.docHPath || doc.docPath || doc.docId}\n${doc.originalUrl}`)
+function copyReference(doc: ImageReferenceItem) {
+  copyText(`${doc.hpath || doc.path || doc.rootId || doc.blockId}\n${doc.markdown || doc.content || doc.originalUrl}`)
+}
+
+function openReference(doc: ImageReferenceItem) {
+  try {
+    const plugin = usePlugin()
+    if (!plugin?.app) {
+      showMessage('未获取到插件上下文，无法跳转')
+      return
+    }
+
+    openTab({
+      app: plugin.app,
+      doc: {
+        id: doc.blockId,
+        action: ['cb-get-focus', 'cb-get-hl'],
+        zoomIn: false,
+      },
+      keepCursor: false,
+      removeCurrentTab: false,
+    })
+
+    window._sy_plugin_sample?.togglePanel?.(false)
+  }
+  catch {
+    showMessage('跳转失败')
+  }
 }
 
 watch(docsExpanded, (value) => {
   if (!value)
     return
+
+  if (props.item.referencesLoading)
+    return
+
+  props.item.referencesLoading = true
+  queryAssetReferences(props.item.url)
+    .then((rows) => {
+      props.item.references = rows
+      props.item.referenceCount = rows.length
+    })
+    .catch(() => {
+      props.item.references = []
+      props.item.referenceCount = 0
+      showMessage('查找引用失败')
+    })
+    .finally(() => {
+      props.item.referencesLoading = false
+    })
 })
 
 onMounted(() => {

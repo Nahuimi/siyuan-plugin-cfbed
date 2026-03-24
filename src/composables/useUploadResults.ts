@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { showMessage } from 'siyuan'
-import { buildReplacePreviewItems } from '@/utils/replace'
-import type { ImageItem, ReplacePreviewItem, UploadLogFilter, UploadMappingItem } from '@/types/plugin'
+import { canImageBeReplaced } from '@/utils/replace'
+import type { ImageItem, UploadLogFilter, UploadMappingItem } from '@/types/plugin'
 
 const UPLOAD_MAPPINGS_STORAGE_KEY = 'cfbed-upload-mappings'
 
@@ -19,8 +19,7 @@ type UseUploadResultsOptions = {
 export function useUploadResults(options: UseUploadResultsOptions) {
   const uploadMappings = ref<UploadMappingItem[]>(loadMappings())
   const uploadLogFilter = ref<UploadLogFilter>('all')
-  const replacePreviewVisible = ref(false)
-  const replacePreviewItems = ref<ReplacePreviewItem[]>([])
+  const replacePreviewActive = ref(false)
 
   function addMapping(item: UploadMappingItem) {
     uploadMappings.value.unshift(item)
@@ -47,9 +46,44 @@ export function useUploadResults(options: UseUploadResultsOptions) {
   }
 
   function buildReplacePreview() {
-    replacePreviewItems.value = buildReplacePreviewItems(options.filteredImages.value)
-    replacePreviewVisible.value = true
+    const replaceable = options.filteredImages.value.filter(canImageBeReplaced)
+    if (!replaceable.length) {
+      showMessage('当前没有可替换的已上传图片')
+      replacePreviewActive.value = false
+      return
+    }
+
+    for (const image of options.filteredImages.value) {
+      image.replacePreviewExcluded = !canImageBeReplaced(image)
+    }
+
+    replacePreviewActive.value = true
   }
+
+  function hideReplacePreview() {
+    replacePreviewActive.value = false
+    for (const image of options.filteredImages.value) {
+      image.replacePreviewExcluded = false
+    }
+  }
+
+  function excludeImageFromReplacePreview(imageId: string) {
+    const target = options.filteredImages.value.find(item => item.id === imageId)
+    if (!target)
+      return
+    target.replacePreviewExcluded = true
+  }
+
+  function includeImageInReplacePreview(imageId: string) {
+    const target = options.filteredImages.value.find(item => item.id === imageId)
+    if (!target || !canImageBeReplaced(target))
+      return
+    target.replacePreviewExcluded = false
+  }
+
+  const replacePreviewImages = computed(() =>
+    options.filteredImages.value.filter(item => canImageBeReplaced(item) && !item.replacePreviewExcluded),
+  )
 
   const mappingSummary = computed(() => {
     const total = uploadMappings.value.length
@@ -127,14 +161,17 @@ export function useUploadResults(options: UseUploadResultsOptions) {
   return {
     uploadMappings,
     uploadLogFilter,
-    replacePreviewVisible,
-    replacePreviewItems,
+    replacePreviewActive,
+    replacePreviewImages,
     mappingSummary,
     addMapping,
     clearMappings,
     removeMapping,
     findSuccessfulMapping,
     buildReplacePreview,
+    hideReplacePreview,
+    excludeImageFromReplacePreview,
+    includeImageInReplacePreview,
     exportMappingsAsJson,
     exportMappingsAsCsv,
     filterLogs,

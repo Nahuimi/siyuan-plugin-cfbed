@@ -2,12 +2,13 @@
 
 [简体中文](./README_zh_CN.md)
 
-This plugin helps manage images used in the **current document and its child documents** inside SiYuan, and upload them to [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed).
+This plugin helps manage images used in the **current document** inside SiYuan, and upload them to [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed).
 
 ## Features
 
 - Support **multiple CloudFlare-ImgBed profiles**
-- Scan images from the **current note and descendant notes**
+- Support **light / dark / auto theme switching** in the panel
+- Scan images from the **current note only**
 - Classify images by source:
   - Local
   - External
@@ -32,7 +33,6 @@ Each profile supports:
 
 - name
 - host
-- public domain
 - token / API key
 - auth code
 - upload channel
@@ -40,11 +40,24 @@ Each profile supports:
 - upload folder
 - upload name type
 - return format
-- auto retry
-- server compress (Telegram only)
-- chunk size (MB)
+
+Advanced options are shown conditionally based on the selected upload channel:
+
+- **Telegram**: chunk size (MB) + server compress
+- **Discord**: chunk size (MB)
+- **Other channels**: these two options are hidden
 
 These fields now follow the CloudFlare-ImgBed / PicGo uploader style you provided, and common options are presented as selects or switches to reduce manual input.
+
+### Theme switching
+
+The top-right area of the panel includes a theme toggle button.
+
+- **Auto**: follow the system color scheme
+- **Light**: use the light palette
+- **Dark**: use the dark palette
+
+This setting is persisted locally.
 
 ### Own domains
 
@@ -62,7 +75,6 @@ Images from these domains, plus profile public domains, will be classified as `o
 Click **Refresh Scan** to:
 
 - locate the current note
-- collect child notes in the same subtree
 - extract image URLs from Markdown and HTML
 - classify and display them
 
@@ -92,4 +104,3 @@ npm run build
 ## Credits
 
 - [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)
-- Reference uploader: [picgo-plugin-cfbed-uploader](https://github.com/Nahuimi/picgo-plugin-cfbed-uploader)

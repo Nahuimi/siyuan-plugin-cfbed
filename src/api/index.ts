@@ -1,5 +1,5 @@
 import { showMessage } from 'siyuan'
-import type { DocInfo } from '@/types/plugin'
+import type { DocInfo, ImageReferenceItem } from '@/types/plugin'
 
 type SiyuanApiResponse<T = any> = {
   code: number
@@ -15,36 +15,6 @@ type NotebookInfo = {
   closed: boolean
 }
 
-type ListDocsFile = {
-  id: string
-  path: string
-  name: string
-  name1?: string
-  icon?: string
-  alias?: string
-  memo?: string
-  bookmark?: string
-  count?: number
-  size?: number
-  hSize?: string
-  mtime?: number
-  ctime?: number
-  hMtime?: string
-  hCtime?: string
-  sort?: number
-  subFileCount: number
-  hidden?: boolean
-  newFlashcardCount?: number
-  dueFlashcardCount?: number
-  flashcardCount?: number
-}
-
-type ListDocsByPathResponse = {
-  box: string
-  path: string
-  files: ListDocsFile[]
-}
-
 type ExportMdContentResponse = {
   hPath: string
   content: string
@@ -57,6 +27,8 @@ type BlockRow = {
   hpath?: string
   root_id?: string
   type?: string
+  markdown?: string
+  content?: string
 }
 
 type NotificationPushResponse = {
@@ -190,6 +162,41 @@ export async function sql<T = any>(stmt: string): Promise<T[]> {
   return await requestSiyuan<T[]>('/api/query/sql', { stmt })
 }
 
+export async function queryAssetReferences(assetUrl: string, limit = 50): Promise<ImageReferenceItem[]> {
+  const normalized = String(assetUrl || '').trim().replace(/^\/+/, '')
+  const fileName = normalized.split('/').pop() || normalized
+  const candidates = Array.from(new Set([
+    normalized,
+    normalized.startsWith('assets/') ? `/${normalized}` : '',
+    fileName ? `assets/${fileName}` : '',
+    fileName ? `/assets/${fileName}` : '',
+  ].filter(Boolean)))
+
+  if (!candidates.length) {
+    return []
+  }
+
+  const stmt = `
+    select id, root_id, box, path, hpath, markdown, content
+    from blocks
+    where ${candidates.map(item => `markdown like '%${escapeSql(item)}%'`).join(' or ')}
+    order by updated desc
+    limit ${Math.max(1, Math.min(200, limit))}
+  `
+
+  const rows = await sql<BlockRow>(stmt)
+  return (rows || []).map(row => ({
+    blockId: row.id,
+    rootId: row.root_id || '',
+    box: row.box || '',
+    path: row.path || '',
+    hpath: row.hpath || '',
+    markdown: row.markdown || '',
+    content: row.content || '',
+    originalUrl: assetUrl,
+  }))
+}
+
 /**
  * 通过 blocks 表读取基础信息
  * 常用于补 notebook/path/hpath/root_id。
@@ -263,30 +270,6 @@ export async function getIDsByHPath(notebook: string, hpath: string): Promise<st
 }
 
 /**
- * 列出某路径下的子文档
- * /api/filetree/listDocsByPath [5]
- */
-export async function listDocsByPath(
-  notebook: string,
-  path: string,
-  options?: {
-    sort?: number
-    maxListCount?: number
-    flashcard?: boolean
-  },
-): Promise<ListDocsFile[]> {
-  const data = await requestSiyuan<ListDocsByPathResponse>('/api/filetree/listDocsByPath', {
-    notebook,
-    path,
-    sort: options?.sort ?? 256,
-    maxListCount: options?.maxListCount,
-    flashcard: options?.flashcard ?? false,
-  })
-
-  return Array.isArray(data?.files) ? data.files : []
-}
-
-/**
  * 获取文档 notebook/path/hpath
  */
 export async function getDocNotebookAndPath(docId: string): Promise<{
@@ -314,49 +297,6 @@ export async function getDocNotebookAndPath(docId: string): Promise<{
     path: basic.path,
     hpath,
   }
-}
-
-/**
- * 递归获取指定文档的全部子文档
- */
-export async function listChildDocs(docId: string): Promise<Array<{
-  id: string
-  path: string
-  hpath: string
-}>> {
-  const root = await getDocNotebookAndPath(docId)
-  const results: Array<{ id: string, path: string, hpath: string }> = []
-
-  async function walk(currentPath: string) {
-    const children = await listDocsByPath(root.notebook, currentPath)
-
-    for (const item of children) {
-      if (!item?.id || !item?.path)
-        continue
-
-      let hpath = ''
-      try {
-        hpath = await getHPathByPath(root.notebook, item.path)
-      }
-      catch {
-        hpath = ''
-      }
-
-      results.push({
-        id: item.id,
-        path: item.path,
-        hpath,
-      })
-
-      if ((item.subFileCount || 0) > 0) {
-        await walk(item.path)
-      }
-    }
-  }
-
-  await walk(root.path)
-
-  return results.filter(item => item.id !== docId)
 }
 
 /**
@@ -388,39 +328,18 @@ export async function updateDocContent(docId: string, markdown: string): Promise
 }
 
 /**
- * 获取当前文档 + 全部子文档 markdown
+ * 获取当前文档 markdown
  */
-export async function getCurrentAndChildDocs(): Promise<DocInfo[]> {
+export async function getCurrentDocs(): Promise<DocInfo[]> {
   const currentDocId = await getCurrentDocId()
   const currentMeta = await getDocNotebookAndPath(currentDocId)
 
-  const docs: DocInfo[] = []
-
-  docs.push({
+  return [{
     id: currentDocId,
     path: currentMeta.path,
     hpath: currentMeta.hpath || '当前文档',
     content: await getDocContent(currentDocId),
-  })
-
-  const children = await listChildDocs(currentDocId)
-
-  for (const child of children) {
-    try {
-      const content = await getDocContent(child.id)
-      docs.push({
-        id: child.id,
-        path: child.path,
-        hpath: child.hpath,
-        content,
-      })
-    }
-    catch (error) {
-      console.warn('[cfbed] 读取子文档 markdown 失败:', child.id, error)
-    }
-  }
-
-  return docs
+  }]
 }
 
 /**

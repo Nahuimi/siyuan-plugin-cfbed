@@ -2,12 +2,13 @@
 
 [English](./README.md)
 
-这是一个面向思源笔记的图床扩展，核心目标是帮助你管理“当前笔记及其子笔记”中的图片，并与 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 对接。
+这是一个面向思源笔记的图床扩展，核心目标是帮助你管理“当前笔记”中的图片，并与 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 对接。
 
 ## 功能
 
 1. 支持 **多个 CloudFlare-ImgBed 配置**
-2. 扫描 **当前笔记及其子笔记** 的图片
+2. 支持面板 **亮色 / 暗色 / 自动** 主题切换
+2. 扫描 **当前笔记** 的图片
 3. 按图片来源自动分类：
    - 本地
    - 外链
@@ -32,7 +33,6 @@
 
 - 名称
 - 站点地址
-- 公开访问域名
 - Token / API Key
 - 上传认证码
 - 上传渠道
@@ -40,11 +40,24 @@
 - 上传目录
 - 命名方式
 - 返回格式
-- 自动重试
-- 服务端压缩（Telegram 渠道有效）
-- 分块大小（MB）
+
+其中有两项会根据“上传渠道”动态显示：
+
+- **Telegram**：显示“分块大小（MB）”和“服务端压缩”
+- **Discord**：只显示“分块大小（MB）”
+- **其他渠道**：这两项都不显示
 
 这些字段已按照你提供的 CloudFlare-ImgBed / PicGo 插件配置模型适配，常用项尽量改成了下拉或开关选择，减少手动输入。
+
+### 主题切换
+
+面板右上角提供主题切换按钮，支持三种模式：
+
+- **自动**：跟随系统主题
+- **亮色**：使用浅色配色
+- **暗色**：使用深色配色
+
+主题选择会保存在本地配置中。
 
 ### 3. 配置“自己图床域名”
 
@@ -62,7 +75,6 @@ cdn.example.com
 打开面板后点击“刷新扫描”，插件会：
 
 - 获取当前编辑中的笔记
-- 找到该笔记及其所有子笔记
 - 提取 Markdown / HTML 中的图片地址
 - 按来源分类展示
 
@@ -99,4 +111,3 @@ npm run build
 ## 致谢
 
 - [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)
-- 参考实现：[picgo-plugin-cfbed-uploader](https://github.com/Nahuimi/picgo-plugin-cfbed-uploader)

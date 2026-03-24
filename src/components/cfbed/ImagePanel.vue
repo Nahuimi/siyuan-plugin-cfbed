@@ -25,15 +25,18 @@
           v-for="item in images"
           :key="item.id"
           :item="item"
+          :replace-preview-active="replacePreviewActive"
           @retry="$emit('retry', $event)"
           @cancel="$emit('cancel', $event)"
+          @confirm-replace="$emit('confirm-replace', $event)"
+          @cancel-replace="$emit('cancel-replace', $event)"
         />
       </div>
 
       <div v-else class="empty-state empty-state--premium image-empty-state">
         <div class="empty-state__icon">🖼️</div>
         <div class="empty-state__title">暂无图片结果</div>
-        <div class="minor-text">点击左侧“刷新扫描”后，这里会展示当前笔记及子笔记中的图片资源。</div>
+        <div class="minor-text">点击左侧“刷新扫描”后，这里会展示当前笔记中的图片资源。</div>
       </div>
     </div>
   </section>
@@ -52,6 +55,7 @@ defineProps<{
     external: boolean
     own: boolean
   }
+  replacePreviewActive: boolean
 }>()
 
 defineEmits<{
@@ -59,6 +63,8 @@ defineEmits<{
   (e: 'toggle-filter', type: 'local' | 'external' | 'own'): void
   (e: 'retry', item: ImageItem): void
   (e: 'cancel', imageId: string): void
+  (e: 'confirm-replace', item: ImageItem): void
+  (e: 'cancel-replace', item: ImageItem): void
   (e: 'retry-failed'): void
   (e: 'upload-scope', scope: BatchUploadScope): void
 }>()

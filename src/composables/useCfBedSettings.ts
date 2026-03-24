@@ -30,6 +30,7 @@ function createDefaultSettings(): PluginSettings {
   return {
     activeConfigId: config.id,
     autoReplace: false,
+    themeMode: 'auto',
     ownDomainsText: '',
     configs: [config],
   }
@@ -63,6 +64,8 @@ export function useCfBedSettings() {
         return createDefaultSettings()
       if (!parsed.activeConfigId)
         parsed.activeConfigId = parsed.configs[0].id
+      if (!parsed.themeMode)
+        parsed.themeMode = 'auto'
       return parsed
     }
     catch {

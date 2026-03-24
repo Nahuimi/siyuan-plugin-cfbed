@@ -36,6 +36,7 @@ function getDefaultSettings(): PluginSettings {
   return {
     activeConfigId: defaultConfig.id,
     autoReplace: false,
+    themeMode: 'auto',
     ownDomainsText: '',
     configs: [defaultConfig],
   }
@@ -147,7 +148,7 @@ export default class PluginSample extends Plugin {
 
     this.setting.addItem({
       title: '图床面板',
-      description: '查看当前笔记与子笔记中的图片，并进行筛选、上传与替换。',
+      description: '查看当前笔记中的图片，并进行筛选、上传与替换。',
       actionElement: panelButton,
     })
 

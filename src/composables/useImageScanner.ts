@@ -1,7 +1,9 @@
 import { computed, ref } from 'vue'
-import { getCurrentAndChildDocs, pushErrMsg, updateDocContent } from '@/api'
+import { pushErrMsg, updateDocContent } from '@/api'
+import { getCurrentDocs, queryAssetReferences } from '@/api/index'
 import { extractMarkdownImages, detectImageSourceType, getDomainFromUrl, isImageLikeUrl } from '@/utils/image'
 import { replaceAllOccurrences } from '@/utils/replace'
+import { canImageBeReplaced } from '@/utils/replace'
 import type { ImageItem } from '@/types/plugin'
 
 export function useImageScanner(
@@ -10,6 +12,7 @@ export function useImageScanner(
 ) {
   const currentDocTitle = ref('')
   const images = ref<ImageItem[]>([])
+  let refreshVersion = 0
 
   const filters = ref({
     local: true,
@@ -38,8 +41,15 @@ export function useImageScanner(
   )
 
   async function refreshImages() {
+    const currentVersion = ++refreshVersion
+
     try {
-      const docs = await getCurrentAndChildDocs()
+      const previousImageMap = new Map(images.value.map(item => [item.url, item]))
+      const docs = await getCurrentDocs()
+
+      if (currentVersion !== refreshVersion)
+        return
+
       currentDocTitle.value = docs[0]?.hpath || '当前文档'
 
       const map = new Map<string, ImageItem>()
@@ -62,6 +72,8 @@ export function useImageScanner(
             continue
           }
 
+          const previous = previousImageMap.get(url)
+
           map.set(url, {
             id: `img-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
             url,
@@ -75,16 +87,48 @@ export function useImageScanner(
                 originalUrl: url,
               },
             ],
+            references: previous?.references || [],
+            referenceCount: previous?.referenceCount || 0,
+            referencesLoading: false,
             selected: false,
             status: findMappedUrl?.(url) ? 'success' : 'idle',
             message: '',
             uploadedUrl: findMappedUrl?.(url) || '',
             progress: 0,
+            replacePreviewExcluded: false,
           })
         }
       }
 
-      images.value = Array.from(map.values())
+      const nextImages = Array.from(map.values())
+
+      if (currentVersion !== refreshVersion)
+        return
+
+      images.value = nextImages
+
+      await Promise.allSettled(nextImages.map(async (item) => {
+        item.referencesLoading = true
+        const previousCount = item.referenceCount || 0
+        const previousReferences = item.references || []
+        try {
+          const rows = await queryAssetReferences(item.url)
+          item.references = rows
+          item.referenceCount = rows.length
+        }
+        catch {
+          item.references = previousReferences
+          item.referenceCount = previousCount
+        }
+        finally {
+          item.referencesLoading = false
+        }
+      }))
+
+      if (currentVersion !== refreshVersion)
+        return
+
+      images.value = [...nextImages]
     }
     catch (error: any) {
       pushErrMsg(error?.message || '扫描图片失败')
@@ -101,13 +145,11 @@ export function useImageScanner(
     images.value = images.value.map(item => item.id === id ? { ...item, ...patch } : item)
   }
 
-  async function replaceUploadedLinks() {
+  async function replaceUploadedLinks(targetImages?: ImageItem[]) {
     const replaceGroups = new Map<string, Array<{ oldUrl: string, newUrl: string }>>()
+    const sourceImages = (targetImages?.length ? targetImages : images.value).filter(canImageBeReplaced)
 
-    for (const image of images.value) {
-      if (!image.uploadedUrl)
-        continue
-
+    for (const image of sourceImages) {
       for (const doc of image.docs) {
         if (!replaceGroups.has(doc.docId)) {
           replaceGroups.set(doc.docId, [])
@@ -124,7 +166,7 @@ export function useImageScanner(
       return
     }
 
-    const docs = await getCurrentAndChildDocs()
+    const docs = await getCurrentDocs()
     const docMap = new Map(docs.map(doc => [doc.id, doc]))
 
     for (const [docId, replacements] of replaceGroups.entries()) {
