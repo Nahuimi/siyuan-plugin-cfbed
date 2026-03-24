@@ -1,37 +1,39 @@
-import {
-  Plugin,
-} from "siyuan";
+import { Plugin } from 'siyuan'
 import { createApp } from 'vue'
 import App from './App.vue'
 
 let plugin = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
-  console.log('usePlugin', pluginProps, plugin)
   if (pluginProps) {
     plugin = pluginProps
   }
   if (!plugin && !pluginProps) {
     console.error('need bind plugin')
   }
-  return plugin;
+  return plugin
 }
 
 
 let app = null
+let root: HTMLDivElement | null = null
 export function init(plugin: Plugin) {
-  // bind plugin hook
-  usePlugin(plugin);
+  usePlugin(plugin)
 
-  const div = document.createElement('div')
-  div.classList.toggle('plugin-sample-vite-vue-app')
-  div.id = this.name
+  root = document.createElement('div')
+  root.classList.add('plugin-cfbed-app')
+  root.id = `${plugin.name}-root`
   app = createApp(App)
-  app.mount(div)
-  document.body.appendChild(div)
+  app.mount(root)
+  document.body.appendChild(root)
 }
 
 export function destroy() {
-  app.unmount()
-  const div = document.getElementById(this.name)
-  document.body.removeChild(div)
+  if (app) {
+    app.unmount()
+    app = null
+  }
+  if (root?.parentNode) {
+    root.parentNode.removeChild(root)
+  }
+  root = null
 }

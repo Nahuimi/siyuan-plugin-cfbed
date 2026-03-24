@@ -1,151 +1,102 @@
-# Siyuan Plugin Template - Vite & Vue3
+# 思源笔记 CloudFlare 图床管理插件
 
 [English](./README.md)
 
-> 本例同 [siyuan/plugin-sample](https://github.com/siyuan-note/plugin-sample).
+这是一个面向思源笔记的图床扩展，核心目标是帮助你管理“当前笔记及其子笔记”中的图片，并与 [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed) 对接。
 
-1. 使用 Vite 打包
-2. 使用 Vue3 进行开发
-3. 提供一个github action 模板，能自动生成package.zip并上传到新版本中
-4. 提供自动更新 `plugin.json` 中的 `version` 并发布新版本的脚本。[link](#release-script)
+## 功能
 
-> [!NOTE]
->
-> 在开始之前，你需要先安装 [NodeJS](https://nodejs.org/en/download) 和 [pnpm](https://pnpm.io/installation)。
+1. 支持 **多个 CloudFlare-ImgBed 配置**
+2. 扫描 **当前笔记及其子笔记** 的图片
+3. 按图片来源自动分类：
+   - 本地
+   - 外链
+   - 自己图床
+4. 支持配置“**自己图床域名**”列表，用域名识别图片归属
+5. 可筛选图片并批量上传到当前启用的 CloudFlare-ImgBed
+6. 可选择是否在上传成功后 **自动替换原图片链接**（默认关闭）
+7. 也支持在上传后手动执行链接替换
 
-## 开始
+## 使用方式
 
-1. 通过 `Use the template` 按钮，以该仓库为模板创建你自己的项目。
-> [!WARNING]
->
-> 请注意库名和插件名称一致，默认分支必须为 `main`.
+### 1. 打开插件面板
 
-> [!WARNING]
->
-> 初次尝试，请不要修改任何内容，直接通过下述方式，成功在思源里加载插件模板以后，再进行调整。
->
-> 例如删除 README_zh_CN.md 也会导致插件加载不成功。
+启用插件后，可通过：
 
+- 顶栏按钮打开图床管理面板
+- 插件设置中的“打开图床管理面板”进入
 
-2. 使用 `git clone` 克隆创建好的仓库。
-3. 使用 `pnpm i` 安装项目所需的依赖。
+### 2. 配置 CloudFlare-ImgBed
 
-4. 复制 `.env.example` 文件并取名为 `.env`，修改其中的 `VITE_SIYUAN_WORKSPACE_PATH` 为你的思源工作空间。
+在配置面板中可以新增多个图床配置，每个配置支持设置：
 
+- 名称
+- 站点地址
+- 公开访问域名
+- Token / API Key
+- 上传认证码
+- 上传渠道
+- 渠道名称
+- 上传目录
+- 命名方式
+- 返回格式
+- 自动重试
+- 服务端压缩（Telegram 渠道有效）
+- 分块大小（MB）
 
-> [!TIP]
->
-> 如果你不喜欢将项目打包至工作空间中，可以使用 `软链接` 的方式。
->
-> 直接写入思源空间下，可通过思源的同步功能直接同步至其他设备，而软链接的方式则不会参与同步。
-> 
-> 本模板不提供软链接的具体内容，相关内容可参考 [plugin-sample-vite-svelte](https://github.com/siyuan-note/plugin-sample-vite-svelte)。
-> 
+这些字段已按照你提供的 CloudFlare-ImgBed / PicGo 插件配置模型适配，常用项尽量改成了下拉或开关选择，减少手动输入。
 
+### 3. 配置“自己图床域名”
 
-5. 使用 `pnpm dev` 启动项目，看到类似下面的内容表示构建成功
+在“自己图床域名”中每行填写一个域名，例如：
 
-  ```
-
-  > plugin-sample-vite-vue@0.0.1 dev /path/to/your/plugin-sample-vite-vue
-  > vite build --watch
-
-  mode=> production
-  env=> {
-    VITE_SIYUAN_WORKSPACE_PATH: '/path/to/siyuan/workspace',
-  }
-
-  Siyuan workspace path is set:
-  /path/to/siyuan/workspace
-
-  Plugin will build to:
-  # ✅ 插件将会构建至下面的位置
-  /path/to/siyuan/workspace/data/plugins/plugin-sample-vite-vue
-
-  isWatch=> true
-  distDir=> /path/to/siyuan/workspace/data/plugins/plugin-sample-vite-vue
-  vite v6.3.5 building for production...
-
-  watching for file changes...
-
-  build started...
-  ✓ 26 modules transformed.
-  rendering chunks (1)...LiveReload enabled
-  ../../Siyuan-plugin/data/plugins/plugin-sample-vite-vue/index.css    1.08 kB │ gzip:  0.41 kB
-  ../../Siyuan-plugin/data/plugins/plugin-sample-vite-vue/index.js   198.60 kB │ gzip: 46.59 kB
-  [vite-plugin-static-copy] Copied 7 items.
-  built in 502ms.
-  ```
-
-   刷新思源，你将会在 `思源 - 设置 - 集市` 中看到名为 `plugin-sample-vite-vue` 的插件。
-   
-6. 启用插件, 并检查 `App.vue` 文件进行开发。
-
-   这个文件中包含了一些代码示例。
-
-
-> [!TIP]
->
-> 更多的插件代码案例，请查看： [siyuan/plugin-sample/src/index.ts](https://github.com/siyuan-note/plugin-sample/blob/main/src/index.ts)
-
-
-
-## 上架集市
-
-### 使用 Github Action
-
-1. 你可以在本地使用插件的版本创建一个名为 `v*` 的 tag。
-2. 将创建好的 tag 推送至 Github。模板项目提供了 Action 脚本自动构建新版本。
-
-
-> [!TIP]
->
-> <div id="release-script"></div>这个项目提供了自动创建 `tag` 并发布新版本的脚本，你可以通过运行 `pnpm release` 创建一个修正版本。
->
-> 你可以通过使用参数 `--mode=manual|patch|minor|major` 设置版本号的调整模式，或者通过 `pnpm release:manual` 的方式直接以特定参数进行发布。
->
-> 完整的命令列表请查看 `package.json` 文件。
-
-
-样例中自带了 github action，可以自动打包发布，请遵循以下操作：
-
-1. 设置项目 `https://github.com/OWNER/REPO/settings/actions` 页面向下划到 Workflow Permissions，打开配置
-
-![img](./asset/action.png)
-
-2. 需要发布版本的时候，push 一个格式为 `v*` 的 tag，github 就会自动打包发布 release（包括 package.zip）
-3. 默认使用保守策略进行 pre-release 发布，如果觉得没有必要，可以更改 release.yml 中的设置：
-
-```yaml
-- name: Release
-    uses: ncipollo/release-action@v1
-    with.
-        allowUpdates: true
-        artifactErrorsFailBuild: true
-        artifacts: 'package.zip'
-        token: ${{ secrets.GITHUB_TOKEN }}
-        prerelease: true # change this to false
+```txt
+img.example.com
+cdn.example.com
 ```
 
-### 手动发布
+插件会将这些域名下的图片识别为“自己图床”。同时，配置中的“公开访问域名”也会自动纳入识别范围。
 
-1. 使用 `pnpm build` 构建 `package.zip`
-2. 在 GitHub 上创建一个新的发布，使用插件版本号作为 “Tag version”，示例: https://github.com/siyuan-note/plugin-sample/releases
-3. 上传 package.zip 作为二进制附件
-4. 提交发布
+### 4. 扫描与上传
 
-> [!NOTE]
-> 
-> 如果是第一次发布版本，还需要创建一个 PR 到 [Community Bazaar](https://github.com/siyuan-note/bazaar)  社区集市仓库，修改该库的 plugins.json。该文件是所有社区插件库的索引，格式为：
+打开面板后点击“刷新扫描”，插件会：
 
-```json
-{
-  "repos": [
-    "username/reponame"
-  ]
-}
+- 获取当前编辑中的笔记
+- 找到该笔记及其所有子笔记
+- 提取 Markdown / HTML 中的图片地址
+- 按来源分类展示
+
+然后你可以：
+
+- 按分类筛选
+- 全选当前筛选结果
+- 仅上传外链或本地图片
+- 上传完成后手动替换链接
+
+### 5. 自动替换链接
+
+插件提供“上传后自动替换链接”开关，**默认关闭**。
+
+- 关闭：上传成功后仅记录新链接，不改原文
+- 开启：上传成功后自动把对应图片链接替换为图床新链接
+
+## 开发
+
+```bash
+npm install
+npm run build
 ```
 
----
+如需开发调试，可结合你的思源工作空间配置 Vite 输出目录后使用 watch 模式。
 
-更多有关于插件的信息，请查看： [siyuan/plugin-sample](https://github.com/siyuan-note/plugin-sample).
+## 注意事项
+
+1. 插件对 CloudFlare-ImgBed 的兼容采用“可配置接口字段”的方式，适配不同部署版本
+2. 图片链接替换目前按导出的 Markdown 文本做字符串替换，请在重要笔记上先做测试
+3. 如果远程图片存在防盗链、鉴权或跨域限制，浏览器侧可能无法直接抓取上传
+4. 当前上传实现已适配普通上传、405 自动切换 `/upload` / `/upload/`、以及大文件分块上传逻辑
+
+## 致谢
+
+- [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)
+- 参考实现：[picgo-plugin-cfbed-uploader](https://github.com/Nahuimi/picgo-plugin-cfbed-uploader)

@@ -3,6 +3,7 @@
     class="b3-text-field fn__block"
     :value="modelValue"
     @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+    v-bind="$attrs"
   ></textarea>
 </template>
 

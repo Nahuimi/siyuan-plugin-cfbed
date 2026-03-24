@@ -1,147 +1,95 @@
-# Siyuan Plugin Template - Vite & Vue3
+# SiYuan CloudFlare ImgBed Plugin
 
 [简体中文](./README_zh_CN.md)
 
-> Consistent with [siyuan/plugin-sample](https://github.com/siyuan-note/plugin-sample).
+This plugin helps manage images used in the **current document and its child documents** inside SiYuan, and upload them to [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed).
 
-1. Use Vite for packaging
-2. Use Vue3 for development
-3. Provides a github action template to automatically generate package.zip and upload to new release
-4. Provides a script to auto create tag and release. [link](#release-script)
+## Features
 
-> [!NOTE]
->
-> Before your start, you need install [NodeJS](https://nodejs.org/en/download) and [pnpm](https://pnpm.io/installation) first.
+- Support **multiple CloudFlare-ImgBed profiles**
+- Scan images from the **current note and descendant notes**
+- Classify images by source:
+  - Local
+  - External
+  - Own image host
+- Configure custom domains to identify your **own image host**
+- Filter images and batch upload them to the active CloudFlare-ImgBed profile
+- Optional **auto replace links after upload** (disabled by default)
+- Manual replacement is also supported after upload
 
-> [!WARNING]
->
-> For your first attempt, please do not modify anything. Load the plugin template in Siyuan as described below before making any changes.
->
-> For example, deleting README_zh_CN.md will also cause the plugin to fail to load.
+## Usage
 
-## Get started
+### Open panel
 
-1. Use the `Use the template` button to make a copy of this repo as template.  
-> [!WARNING]
->
-> That the repository name should match the plugin name, and the default branch must be `main`.
+After enabling the plugin, open the image manager via:
 
+- the top bar button
+- plugin settings entry
 
-2. Use `git clone` to clone the copied repo to your computer.
-3. Use `pnpm i` to install the dependencies.
+### Configure CloudFlare-ImgBed
 
-4. Copy the `.env.example` file as `.env`, set the `VITE_SIYUAN_WORKSPACE_PATH` to your SiYuan workspace.
+Each profile supports:
 
+- name
+- host
+- public domain
+- token / API key
+- auth code
+- upload channel
+- channel name
+- upload folder
+- upload name type
+- return format
+- auto retry
+- server compress (Telegram only)
+- chunk size (MB)
 
-> [!TIP]
->
-> If you prefer not to package the project directly into the workspace, you can use a `symbolic link` instead.
->
-> Writing directly into the Siyuan workspace allows you to sync via Siyuan's sync feature to other devices, while using a symbolic link will not be included in the sync.
->
-> This template does not provide specific details about symbolic links. For related information, please refer to [plugin-sample-vite-svelte](https://github.com/siyuan-note/plugin-sample-vite-svelte).
+These fields now follow the CloudFlare-ImgBed / PicGo uploader style you provided, and common options are presented as selects or switches to reduce manual input.
 
-5. Use `pnpm dev` to run the project, you will see info like below
+### Own domains
 
-  ```
+Add one domain per line, for example:
 
-  > plugin-sample-vite-vue@0.0.1 dev /path/to/your/plugin-sample-vite-vue
-  > vite build --watch
-
-  mode=> production
-  env=> {
-    VITE_SIYUAN_WORKSPACE_PATH: '/path/to/siyuan/workspace',
-    VITE_DEV_DIST_DIR: ''
-  }
-
-  Siyuan workspace path is set:
-  /path/to/siyuan/workspace
-
-  Plugin will build to:
-  # ✅ the plugin will build into here
-  /path/to/siyuan/workspace/data/plugins/plugin-sample-vite-vue
-
-  isWatch=> true
-  distDir=> /path/to/siyuan/workspace/data/plugins/plugin-sample-vite-vue
-  vite v6.3.5 building for production...
-
-  watching for file changes...
-
-  build started...
-  ✓ 26 modules transformed.
-  rendering chunks (1)...LiveReload enabled
-  ../../Siyuan-plugin/data/plugins/plugin-sample-vite-vue/index.css    1.08 kB │ gzip:  0.41 kB
-  ../../Siyuan-plugin/data/plugins/plugin-sample-vite-vue/index.js   198.60 kB │ gzip: 46.59 kB
-  [vite-plugin-static-copy] Copied 7 items.
-  built in 502ms.
-  ```
-
-
-   If successed, restart your siyuan, and you will find the plugin in `Siyuan - Settings - Marketplace`, named as `plugin-sample-vite-vue`.
-6. Enable the plugin, and check the `App.vue` file to start your development.
-   
-   This file contains some example codes.
-
-
-> [!TIP]
->
-> More plugin code examples, please check [siyuan/plugin-sample/src/index.ts](https://github.com/siyuan-note/plugin-sample/blob/main/src/index.ts)
-
-
-
-## List on the Marketplace
-
-### Use Github Action
-
-1. You can create a new tag, use your new version number as the `Tag version` in your local.
-2. Then push the tag to Github. The Github Action will create a new Release for you.
-
-> [!TIP]
->
-> <div id="release-script"></div>This template provided a script to auto create tag and release. You can use `pnpm release` to create a patch version.
->
-> You can add `--mode=manual|patch|minor|major` arg to set release mode, or run with arg like `pnpm release:manual`. 
-> 
-> All the scripts please see the `package.json` file.
-
-The github action is included in this sample, you can use it to publish your new realse to marketplace automatically:
-
-1. In your repo setting page `https://github.com/OWNER/REPO/settings/actions`, down to Workflow Permissions and open the configuration like this:
-
-![img](./asset/action.png)
-
-2. Push a tag in the format `v*` and github will automatically create a new release with new bulit package.zip
-3. By default, it will only publish a pre-release, if you don't think this is necessary, change the settings in release.yml
-
-```yaml
-- name: Release
-    uses: ncipollo/release-action@v1
-    with.
-        allowUpdates: true
-        artifactErrorsFailBuild: true
-        artifacts: 'package.zip'
-        token: ${{ secrets.GITHUB_TOKEN }}
-        prerelease: true # change this to false
+```txt
+img.example.com
+cdn.example.com
 ```
 
-### Manual
+Images from these domains, plus profile public domains, will be classified as `own`.
 
-1. Use `pnpm build` to generate `package.zip`
-2. Create a new Github release using your new version number as the "Tag version". See here for an example: https://github.com/siyuan-note/plugin-sample/releases
-3. Upload the file package.zip as binary attachments
-4. Publish the release
+### Scan and upload
 
-> [!NOTE]
-> If it is the first release, please create a pull request to the [Community Bazaar](https://github.com/siyuan-note/bazaar) repository and modify the plugins.json file in it. This file is the index of all community plugin repositories, the format is:
+Click **Refresh Scan** to:
 
-```json
-{
-  "repos": [
-    "username/reponame"
-  ]
-}
+- locate the current note
+- collect child notes in the same subtree
+- extract image URLs from Markdown and HTML
+- classify and display them
+
+Then you can filter, select, upload, and replace links.
+
+### Auto replace
+
+The plugin provides a switch for **auto replacing image links after upload**.
+
+- Off: upload only, do not modify note content
+- On: replace original links automatically after successful upload
+
+## Development
+
+```bash
+npm install
+npm run build
 ```
 
----
+## Notes
 
-More other plugin info, please check in [siyuan/plugin-sample](https://github.com/siyuan-note/plugin-sample).
+1. Compatibility with CloudFlare-ImgBed is implemented through configurable request/response fields
+2. Link replacement currently works by replacing strings in exported Markdown content, so test on important notes first
+3. Browser-side fetching may fail for remote images protected by anti-leeching, auth, or strict CORS rules
+4. The uploader now supports normal upload, `/upload` vs `/upload/` fallback on 405, and chunked upload for large files
+
+## Credits
+
+- [CloudFlare-ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)
+- Reference uploader: [picgo-plugin-cfbed-uploader](https://github.com/Nahuimi/picgo-plugin-cfbed-uploader)

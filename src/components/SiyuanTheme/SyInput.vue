@@ -1,13 +1,20 @@
 <template>
   <input
-    class="b3-text-field fn__flex-center fn__size200"
+    class="sy-input"
     :value="modelValue"
-    @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     v-bind="$attrs"
-  />
+    @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+  >
 </template>
 
 <script setup lang="ts">
-defineProps(['modelValue'])
-defineEmits(['update:modelValue'])
+defineOptions({ inheritAttrs: false })
+
+defineProps<{
+  modelValue?: string | number
+}>()
+
+defineEmits<{
+  (e: 'update:modelValue', value: string): void
+}>()
 </script>

@@ -8,6 +8,20 @@
 
 import { fetchSyncPost, IWebSocketData } from "siyuan";
 
+function stripExportFrontMatter(markdown: string) {
+  const text = String(markdown || "");
+  if (!text.startsWith("---\n")) {
+    return text;
+  }
+
+  const endIndex = text.indexOf("\n---\n", 4);
+  if (endIndex === -1) {
+    return text;
+  }
+
+  return text.slice(endIndex + 5);
+}
+
 async function request(url: string, data: any) {
   let response: IWebSocketData = await fetchSyncPost(url, data);
   let res = response.code === 0 ? response.data : null;
@@ -317,6 +331,45 @@ export async function getBlockByID(blockId: string): Promise<Block> {
   let sqlScript = `select * from blocks where id ='${blockId}'`;
   let data = await sql(sqlScript);
   return data[0];
+}
+
+export async function getCurrentAndChildDocs(): Promise<Array<{
+  id: string
+  path: string
+  hpath: string
+  content: string
+}>> {
+  const editors = (window as any)?.siyuan?.layout ? [] : []
+  const currentId = document.querySelector('.protyle:not(.fn__none) [data-node-id]')?.getAttribute('data-node-id')
+  if (!currentId) {
+    throw new Error('未找到当前笔记')
+  }
+
+  const current = await getBlockByID(currentId)
+  if (!current) {
+    throw new Error('未找到当前笔记信息')
+  }
+
+  const safeBox = String(current.box).replace(/'/g, "''")
+  const safePath = String(current.path).replace(/'/g, "''")
+  const rows = await sql(`select id, path, hpath from blocks where type = 'd' and box = '${safeBox}' and path like '${safePath}%' order by path asc`)
+  const docs: Array<{ id: string, path: string, hpath: string, content: string }> = []
+
+  for (const row of rows) {
+    const exported = await exportMdContent(row.id)
+    docs.push({
+      id: row.id,
+      path: row.path,
+      hpath: row.hpath,
+      content: stripExportFrontMatter(exported?.content || ''),
+    })
+  }
+
+  return docs
+}
+
+export async function updateDocContent(docId: string, content: string) {
+  return updateBlock('markdown', content, docId)
 }
 
 // **************************************** Template ****************************************

@@ -1,8 +1,8 @@
 {
-  "name": "plugin-sample-vite-vue",
-  "author": "wetoria",
-  "url": "https://github.com/Wetoria/plugin-sample-vite-vue",
-  "version": "0.0.1",
+  "name": "siyuan-plugin-cfbed",
+  "author": "Nahuimi",
+  "url": "https://github.com/Nahuimi/siyuan-plugin-cfbed",
+  "version": "0.1.0",
   "minAppVersion": "2.10.14",
   "disabledInPublish": true,
   "backends": [
@@ -12,14 +12,14 @@
     "all"
   ],
   "displayName": {
-    "default": "plugin-sample-vite-vue",
-    "en_US": "plugin-sample-vite-vue",
-    "zh_CN": "plugin-sample-vite-vue"
+    "default": "siyuan-plugin-cfbed",
+    "en_US": "CloudFlare ImgBed",
+    "zh_CN": "CloudFlare 图床管理"
   },
   "description": {
-    "default": "plugin-sample-vite-vue",
-    "en_US": "plugin-sample-vite-vue",
-    "zh_CN": "plugin-sample-vite-vue"
+    "default": "CloudFlare ImgBed manager for SiYuan",
+    "en_US": "Scan, classify, upload and replace note images with multiple CloudFlare-ImgBed configs.",
+    "zh_CN": "扫描当前笔记及子笔记图片，按域名分类，支持多个 CloudFlare-ImgBed 配置并批量上传替换。"
   },
   "readme": {
     "default": "README.md",

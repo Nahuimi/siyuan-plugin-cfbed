@@ -1,14 +1,10 @@
 <template>
   <select
-    class="b3-select fn__flex-center fn__size200"
+    class="sy-select"
     :value="modelValue"
-    @input="$emit('update:modelValue', ($event.target as any).value)"
+    @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
   >
-    <option
-      v-for="item of options"
-      :key="item.value"
-      :value="item.value"
-    >
+    <option v-for="item in options" :key="item.value" :value="item.value">
       {{ item.text }}
     </option>
   </select>
@@ -16,11 +12,11 @@
 
 <script setup lang="ts">
 defineProps<{
-  options: Array<{
-    value: string
-    text: string
-  }>
-  modelValue: string
+  modelValue?: string | number
+  options: Array<{ value: string | number, text: string }>
 }>()
-defineEmits(['update:modelValue'])
+
+defineEmits<{
+  (e: 'update:modelValue', value: string): void
+}>()
 </script>
