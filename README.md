@@ -87,13 +87,6 @@ The plugin provides a switch for **auto replacing image links after upload**.
 - Off: upload only, do not modify note content
 - On: replace original links automatically after successful upload
 
-## Development
-
-```bash
-npm install
-npm run build
-```
-
 ## Notes
 
 1. Compatibility with CloudFlare-ImgBed is implemented through configurable request/response fields
