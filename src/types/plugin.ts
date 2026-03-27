@@ -13,6 +13,10 @@ export type BatchUploadScope = 'all' | 'local' | 'external'
 
 export type UploadLogFilter = 'all' | 'info' | 'success' | 'error'
 
+export type PanelTab = 'images' | 'settings' | 'upload' | 'misc'
+export type ThemeMode = 'auto' | 'light' | 'dark'
+export type ResolvedThemeMode = 'light' | 'dark'
+
 export interface ImageOccurrence {
   docId: string
   docHPath: string
@@ -73,12 +77,27 @@ export interface CfBedConfig {
   enabled: boolean
 }
 
+export interface QueueUploadItem {
+  id: string
+  file: File
+  name: string
+  size: number
+  status: UploadStatus
+  progress: number
+  message: string
+  uploadedUrl: string
+}
+
 export interface PluginSettings {
   activeConfigId: string
   autoReplace: boolean
-  themeMode: 'auto' | 'light' | 'dark'
+  themeMode: ThemeMode
   ownDomainsText: string
   configs: CfBedConfig[]
+}
+
+export interface ActiveConfigSummary extends CfBedConfig {
+  channelLabel: string
 }
 
 export interface UploadTaskSummary {
@@ -93,6 +112,7 @@ export interface UploadTaskSummary {
 export interface UploadMappingItem {
   id: string
   sourceUrl: string
+  sourceKey?: string
   targetUrl: string
   sourceType: 'queue' | 'image'
   fileName?: string
@@ -105,4 +125,19 @@ export interface ConfigTestResult {
   ok: boolean
   message: string
   detail?: any
+}
+
+export interface ReplacePreviewItem {
+  docId: string
+  docPath: string
+  docHPath: string
+  imageId: string
+  oldUrl: string
+  newUrl: string
+}
+
+export interface CfBedBridge {
+  togglePanel: (force?: boolean) => void
+  openPanel: (tab?: PanelTab) => void
+  openSetting: () => void
 }

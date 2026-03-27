@@ -2,7 +2,7 @@ import type { ImageSourceType } from '@/types/plugin'
 
 export function getDomainFromUrl(url: string) {
   try {
-    return new URL(url).hostname
+    return new URL(url).hostname.toLowerCase()
   }
   catch {
     return ''
@@ -29,7 +29,7 @@ export function isImageLikeUrl(url: string) {
   if (isLocalAsset(url))
     return true
 
-  if (/\.(png|jpe?g|gif|webp|bmp|svg|avif)(\?.*)?$/i.test(url))
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|avif)(?:\?.*)?$/i.test(url))
     return true
 
   return isHttpUrl(url)
@@ -40,7 +40,8 @@ export function detectImageSourceType(url: string, ownDomains: string[]): ImageS
     return 'local'
 
   const host = getDomainFromUrl(url)
-  if (ownDomains.includes(host))
+  const normalizedDomains = ownDomains.map(item => String(item || '').trim().toLowerCase()).filter(Boolean)
+  if (normalizedDomains.some(domain => host === domain || host.endsWith(`.${domain}`)))
     return 'own'
 
   return 'external'
@@ -52,14 +53,12 @@ export function extractMarkdownImages(content: string) {
   const mdImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
   const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi
 
-  let match: RegExpExecArray | null
-
-  while ((match = mdImageRegex.exec(content))) {
+  for (const match of content.matchAll(mdImageRegex)) {
     if (match[1])
       result.push(match[1])
   }
 
-  while ((match = htmlImageRegex.exec(content))) {
+  for (const match of content.matchAll(htmlImageRegex)) {
     if (match[1])
       result.push(match[1])
   }

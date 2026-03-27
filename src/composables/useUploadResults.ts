@@ -1,9 +1,11 @@
 import { computed, ref } from 'vue'
 import { showMessage } from 'siyuan'
+import { pushErrMsg } from '@/api/index'
+import { usePlugin } from '@/main'
 import { canImageBeReplaced } from '@/utils/replace'
 import type { ImageItem, UploadLogFilter, UploadMappingItem } from '@/types/plugin'
-
-const UPLOAD_MAPPINGS_STORAGE_KEY = 'cfbed-upload-mappings'
+import { useI18n } from '@/utils/i18n'
+import { CFBED_MAPPINGS_LEGACY_STORAGE, CFBED_MAPPINGS_STORAGE } from '@/utils/plugin'
 
 type UploadLogItem = {
   id: string
@@ -16,12 +18,26 @@ type UseUploadResultsOptions = {
   filteredImages: { value: ImageItem[] }
 }
 
+type MappingsPlugin = {
+  loadData?: (storage: string) => Promise<UploadMappingItem[] | null | undefined>
+  saveData?: (storage: string, data: UploadMappingItem[]) => Promise<void>
+}
+
 export function useUploadResults(options: UseUploadResultsOptions) {
-  const uploadMappings = ref<UploadMappingItem[]>(loadMappings())
+  const plugin = usePlugin() as MappingsPlugin
+  const { t } = useI18n()
+  const uploadMappings = ref<UploadMappingItem[]>(loadLegacyMappings())
   const uploadLogFilter = ref<UploadLogFilter>('all')
   const replacePreviewActive = ref(false)
+  let persistTimer: number | undefined
+  let pendingSnapshot: UploadMappingItem[] | null = null
+  let mappingsHydrated = false
+  let mappingsMutatedBeforeHydrate = false
+
+  void hydrateMappings()
 
   function addMapping(item: UploadMappingItem) {
+    markMappingsMutated()
     uploadMappings.value.unshift(item)
     if (uploadMappings.value.length > 2000) {
       uploadMappings.value.length = 2000
@@ -30,25 +46,37 @@ export function useUploadResults(options: UseUploadResultsOptions) {
   }
 
   function clearMappings() {
+    markMappingsMutated()
     uploadMappings.value = []
     persistMappings()
   }
 
   function removeMapping(id: string) {
+    markMappingsMutated()
     uploadMappings.value = uploadMappings.value.filter(item => item.id !== id)
     persistMappings()
   }
 
-  function findSuccessfulMapping(sourceUrl: string) {
-    if (!sourceUrl)
+  function findSuccessfulMapping(sourceUrl: string, sourceKey?: string) {
+    const normalizedUrl = String(sourceUrl || '').trim()
+    const normalizedKey = String(sourceKey || '').trim()
+
+    if (!normalizedUrl && !normalizedKey)
       return undefined
-    return uploadMappings.value.find(item => item.sourceUrl === sourceUrl && item.status === 'success' && item.targetUrl)
+
+    return uploadMappings.value.find((item) => {
+      if (item.status !== 'success' || !item.targetUrl)
+        return false
+      if (normalizedKey && item.sourceKey === normalizedKey)
+        return true
+      return normalizedUrl ? item.sourceUrl === normalizedUrl : false
+    })
   }
 
   function buildReplacePreview() {
     const replaceable = options.filteredImages.value.filter(canImageBeReplaced)
     if (!replaceable.length) {
-      showMessage('当前没有可替换的已上传图片')
+      showMessage(t('mappings.preview.none', '当前没有可替换的已上传图片'))
       replacePreviewActive.value = false
       return
     }
@@ -98,14 +126,15 @@ export function useUploadResults(options: UseUploadResultsOptions) {
       type: 'application/json;charset=utf-8',
     })
     downloadBlob(blob, `cfbed-mappings-${Date.now()}.json`)
-    showMessage('映射表已导出为 JSON')
+    showMessage(t('mappings.message.exportJson', '映射表已导出为 JSON'))
   }
 
   function exportMappingsAsCsv() {
-    const header = ['id', 'sourceUrl', 'targetUrl', 'sourceType', 'fileName', 'imageId', 'status', 'time']
+    const header = ['id', 'sourceUrl', 'sourceKey', 'targetUrl', 'sourceType', 'fileName', 'imageId', 'status', 'time']
     const rows = uploadMappings.value.map(item => [
       safeCsv(item.id),
       safeCsv(item.sourceUrl),
+      safeCsv(item.sourceKey || ''),
       safeCsv(item.targetUrl),
       safeCsv(item.sourceType),
       safeCsv(item.fileName || ''),
@@ -119,7 +148,7 @@ export function useUploadResults(options: UseUploadResultsOptions) {
       type: 'text/csv;charset=utf-8',
     })
     downloadBlob(blob, `cfbed-mappings-${Date.now()}.csv`)
-    showMessage('映射表已导出为 CSV')
+    showMessage(t('mappings.message.exportCsv', '映射表已导出为 CSV'))
   }
 
   function safeCsv(value: string) {
@@ -136,20 +165,95 @@ export function useUploadResults(options: UseUploadResultsOptions) {
     URL.revokeObjectURL(url)
   }
 
-  function loadMappings() {
+  function normalizeMappings(items: UploadMappingItem[] | null | undefined): UploadMappingItem[] {
+    if (!Array.isArray(items))
+      return []
+
+    return items
+      .filter(Boolean)
+      .map(item => ({
+        ...item,
+        sourceUrl: String(item.sourceUrl || ''),
+        sourceKey: item.sourceKey ? String(item.sourceKey) : undefined,
+        targetUrl: String(item.targetUrl || ''),
+        sourceType: item.sourceType === 'queue' ? 'queue' as const : 'image' as const,
+        status: item.status === 'cancelled' || item.status === 'error' ? item.status : 'success' as const,
+        time: String(item.time || ''),
+      }))
+  }
+
+  function loadLegacyMappings() {
     try {
-      const raw = localStorage.getItem(UPLOAD_MAPPINGS_STORAGE_KEY)
+      const raw = localStorage.getItem(CFBED_MAPPINGS_LEGACY_STORAGE)
       if (!raw)
         return []
-      return JSON.parse(raw) as UploadMappingItem[]
+      return normalizeMappings(JSON.parse(raw) as UploadMappingItem[])
     }
     catch {
       return []
     }
   }
 
+  async function hydrateMappings() {
+    try {
+      const stored = normalizeMappings(await plugin.loadData?.(CFBED_MAPPINGS_STORAGE))
+      if (stored.length && !mappingsMutatedBeforeHydrate) {
+        uploadMappings.value = stored
+      }
+
+      if (!stored.length && uploadMappings.value.length) {
+        await plugin.saveData?.(CFBED_MAPPINGS_STORAGE, uploadMappings.value)
+        localStorage.removeItem(CFBED_MAPPINGS_LEGACY_STORAGE)
+      }
+    }
+    catch (error: any) {
+      pushErrMsg(error?.message || t('mappings.error.readFailed', '读取上传映射失败'))
+    }
+    finally {
+      mappingsHydrated = true
+    }
+  }
+
   function persistMappings() {
-    localStorage.setItem(UPLOAD_MAPPINGS_STORAGE_KEY, JSON.stringify(uploadMappings.value))
+    if (persistTimer)
+      window.clearTimeout(persistTimer)
+
+    const snapshot = normalizeMappings(uploadMappings.value)
+    pendingSnapshot = snapshot
+    uploadMappings.value = snapshot
+
+    persistTimer = window.setTimeout(async () => {
+      try {
+        await plugin.saveData?.(CFBED_MAPPINGS_STORAGE, snapshot)
+        localStorage.removeItem(CFBED_MAPPINGS_LEGACY_STORAGE)
+        pendingSnapshot = null
+      }
+      catch (error: any) {
+        try {
+          localStorage.setItem(CFBED_MAPPINGS_LEGACY_STORAGE, JSON.stringify(snapshot))
+        }
+        catch {}
+        pushErrMsg(error?.message || t('mappings.error.saveFailed', '保存上传映射失败'))
+      }
+    }, 160)
+  }
+
+  function markMappingsMutated() {
+    if (!mappingsHydrated)
+      mappingsMutatedBeforeHydrate = true
+  }
+
+  async function flushMappings() {
+    if (!pendingSnapshot)
+      return
+
+    if (persistTimer)
+      window.clearTimeout(persistTimer)
+
+    const snapshot = pendingSnapshot
+    pendingSnapshot = null
+    await plugin.saveData?.(CFBED_MAPPINGS_STORAGE, snapshot)
+    localStorage.removeItem(CFBED_MAPPINGS_LEGACY_STORAGE)
   }
 
   function filterLogs(logs: UploadLogItem[]) {
@@ -174,6 +278,7 @@ export function useUploadResults(options: UseUploadResultsOptions) {
     includeImageInReplacePreview,
     exportMappingsAsJson,
     exportMappingsAsCsv,
+    flushMappings,
     filterLogs,
   }
 }

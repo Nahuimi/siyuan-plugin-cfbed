@@ -1,9 +1,8 @@
 import { computed, ref } from 'vue'
-import { pushErrMsg, updateDocContent } from '@/api'
-import { getCurrentDocs, queryAssetReferences, queryAssetReferencesBatch } from '@/api/index'
+import { getCurrentDocs, getEditableDocContent, pushErrMsg, queryAssetReferencesBatch, updateDocContent } from '@/api/index'
+import { useI18n } from '@/utils/i18n'
 import { extractMarkdownImages, detectImageSourceType, getDomainFromUrl, isImageLikeUrl } from '@/utils/image'
-import { replaceAllOccurrences } from '@/utils/replace'
-import { canImageBeReplaced } from '@/utils/replace'
+import { canImageBeReplaced, replaceAllOccurrences } from '@/utils/replace'
 import type { ImageItem, ImageReferenceItem } from '@/types/plugin'
 
 function createFallbackReferences(item: Pick<ImageItem, 'docs' | 'url'>): ImageReferenceItem[] {
@@ -23,6 +22,7 @@ export function useImageScanner(
   ownDomains: { value: string[] },
   findMappedUrl?: (sourceUrl: string) => string | undefined,
 ) {
+  const { t } = useI18n()
   const currentDocTitle = ref('')
   const images = ref<ImageItem[]>([])
   let refreshVersion = 0
@@ -63,7 +63,7 @@ export function useImageScanner(
       if (currentVersion !== refreshVersion)
         return
 
-      currentDocTitle.value = docs[0]?.hpath || '当前文档'
+      currentDocTitle.value = docs[0]?.hpath || t('scanner.currentDoc', '当前文档')
 
       const map = new Map<string, ImageItem>()
 
@@ -86,6 +86,7 @@ export function useImageScanner(
           }
 
           const previous = previousImageMap.get(url)
+          const mappedUrl = findMappedUrl?.(url) || previous?.uploadedUrl || ''
 
           map.set(url, {
             id: `img-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
@@ -103,10 +104,10 @@ export function useImageScanner(
             references: previous?.references || [],
             referenceCount: previous?.referenceCount || 0,
             referencesLoading: true,
-            selected: false,
-            status: findMappedUrl?.(url) ? 'success' : 'idle',
-            message: '',
-            uploadedUrl: findMappedUrl?.(url) || '',
+            selected: previous?.selected ?? false,
+            status: mappedUrl ? 'success' : 'idle',
+            message: mappedUrl ? (previous?.message || t('scanner.message.existingLink', '已存在上传链接')) : '',
+            uploadedUrl: mappedUrl,
             progress: 0,
             replacePreviewExcluded: false,
           })
@@ -143,7 +144,7 @@ export function useImageScanner(
       images.value = nextImages
     }
     catch (error: any) {
-      pushErrMsg(error?.message || '扫描图片失败')
+      pushErrMsg(error?.message || t('scanner.error.scanFailed', '扫描图片失败'))
     }
   }
 
@@ -157,9 +158,24 @@ export function useImageScanner(
     images.value = images.value.map(item => item.id === id ? { ...item, ...patch } : item)
   }
 
+  function resolveLatestImages(targetImages?: ImageItem[]) {
+    if (!targetImages?.length)
+      return images.value
+
+    const latest = targetImages.map(item =>
+      images.value.find(current => current.id === item.id)
+      || images.value.find(current => current.url === item.url)
+      || item,
+    )
+
+    return latest.filter((item, index) =>
+      latest.findIndex(current => current.id === item.id) === index,
+    )
+  }
+
   async function replaceUploadedLinks(targetImages?: ImageItem[]) {
     const replaceGroups = new Map<string, Array<{ oldUrl: string, newUrl: string }>>()
-    const sourceImages = (targetImages?.length ? targetImages : images.value).filter(canImageBeReplaced)
+    const sourceImages = resolveLatestImages(targetImages).filter(canImageBeReplaced)
 
     for (const image of sourceImages) {
       for (const doc of image.docs) {
@@ -174,24 +190,18 @@ export function useImageScanner(
     }
 
     if (!replaceGroups.size) {
-      pushErrMsg('没有可替换的已上传链接')
+      pushErrMsg(t('scanner.error.noReplaceableLinks', '没有可替换的已上传链接'))
       return
     }
 
-    const docs = await getCurrentDocs()
-    const docMap = new Map(docs.map(doc => [doc.id, doc]))
-
     for (const [docId, replacements] of replaceGroups.entries()) {
-      const doc = docMap.get(docId)
-      if (!doc)
-        continue
-
-      let nextContent = doc.content
+      const currentContent = await getEditableDocContent(docId)
+      let nextContent = currentContent
       for (const item of replacements) {
         nextContent = replaceAllOccurrences(nextContent, item.oldUrl, item.newUrl)
       }
 
-      if (nextContent !== doc.content) {
+      if (nextContent !== currentContent) {
         await updateDocContent(docId, nextContent)
       }
     }

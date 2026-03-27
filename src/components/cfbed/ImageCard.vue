@@ -1,11 +1,13 @@
 <template>
-  <div class="image-card premium-card" :class="{ 'image-card--selected': localSelected }" @click="toggleSelected">
+  <div class="image-card surface-card" :class="{ 'image-card--selected': localSelected }" @click="toggleSelected">
     <div class="image-head">
       <span class="tag image-tag" :class="`tag--${item.sourceType}`">{{ sourceTypeLabel(item.sourceType) }}</span>
       <button
         class="ref-count"
         :class="{ 'ref-count--active': docsExpanded }"
-        :title="item.referencesLoading ? '正在刷新引用数' : (docsExpanded ? '关闭引用窗口' : '查看引用内容')"
+        :title="item.referencesLoading
+          ? t('image.references.loadingTitle', '正在刷新引用数')
+          : (docsExpanded ? t('image.references.closeTitle', '关闭引用窗口') : t('image.references.openTitle', '查看引用内容'))"
         @click.stop="docsExpanded = !docsExpanded"
       >
         <span class="ref-count__value">{{ item.referenceCount || 0 }}</span>
@@ -24,31 +26,33 @@
     </div>
 
     <div class="toolbar-row wrap toolbar-row--panel image-toolbar" @click.stop>
-      <button class="image-action image-action--compact" @click="copyText(item.url)">原链接</button>
+      <button class="image-action image-action--compact" @click="copyText(item.url)">{{ t('image.action.originalLink', '原链接') }}</button>
       <button
         v-if="item.sourceType !== 'own' && item.status !== 'uploading' && item.status !== 'preparing' && item.status !== 'queued'"
         class="image-action image-action--compact"
         :class="{ 'image-action--success': item.status === 'success' && !!item.uploadedUrl }"
         @click="$emit('retry', item)"
       >
-        {{ item.status === 'error' || item.status === 'cancelled' ? '重传' : '上传' }}
+        {{ item.status === 'error' || item.status === 'cancelled'
+          ? t('image.action.retryUpload', '重传')
+          : t('common.upload', '上传') }}
       </button>
-      <button class="image-action image-action--compact" @click="copyText(toMarkdown(item.uploadedUrl || item.url))">Markdown</button>
+      <button class="image-action image-action--compact" @click="copyText(toMarkdown(item.uploadedUrl || item.url))">{{ t('image.action.markdown', 'Markdown') }}</button>
       <button
         v-if="item.status === 'uploading' || item.status === 'preparing' || item.status === 'queued'"
         class="image-action image-action--compact image-action--danger"
         @click="$emit('cancel', item.id)"
       >
-        取消
+        {{ t('common.cancel', '取消') }}
       </button>
     </div>
 
     <div v-if="replacePreviewActive && item.uploadedUrl && !item.replacePreviewExcluded" class="ref-dialog ref-dialog--replace" @click.stop>
-      <div class="ref-dialog__panel premium-card">
+      <div class="ref-dialog__panel surface-card">
         <div class="ref-dialog__head">
           <div class="ref-dialog__title-wrap">
-            <div class="ref-dialog__title">替换预览</div>
-            <div class="ref-dialog__subtitle">共 {{ item.docs.length }} 处待替换</div>
+            <div class="ref-dialog__title">{{ t('image.replacePreview.title', '替换预览') }}</div>
+            <div class="ref-dialog__subtitle">{{ t('image.replacePreview.subtitle', '共 {count} 处待替换', { count: item.docs.length }) }}</div>
           </div>
         </div>
 
@@ -61,11 +65,11 @@
             <div class="ref-dialog__main ref-dialog__main--replace">
               <div class="ref-dialog__path">{{ doc.docHPath || doc.docPath || doc.docId }}</div>
               <div class="replace-link-pair">
-                <div class="replace-link-pair__label">原链接</div>
+                <div class="replace-link-pair__label">{{ t('image.replacePreview.originalLink', '原链接') }}</div>
                 <div class="replace-link-pair__value">{{ doc.originalUrl || item.url }}</div>
               </div>
               <div class="replace-link-pair replace-link-pair--next">
-                <div class="replace-link-pair__label">替换为</div>
+                <div class="replace-link-pair__label">{{ t('image.replacePreview.replaceWith', '替换为') }}</div>
                 <div class="replace-link-pair__value">{{ item.uploadedUrl }}</div>
               </div>
             </div>
@@ -73,28 +77,28 @@
         </div>
 
         <div class="toolbar-row wrap toolbar-row--panel replace-action-row">
-          <button class="image-action image-action--compact image-action--danger" @click="$emit('cancel-replace', item)">取消</button>
-          <button class="image-action image-action--compact image-action--success" @click="$emit('confirm-replace', item)">确认替换</button>
+          <button class="image-action image-action--compact image-action--danger" @click="$emit('cancel-replace', item)">{{ t('common.cancel', '取消') }}</button>
+          <button class="image-action image-action--compact image-action--success" @click="$emit('confirm-replace', item)">{{ t('common.confirmReplace', '确认替换') }}</button>
         </div>
       </div>
     </div>
 
     <div v-if="docsExpanded" class="ref-dialog" @click.stop>
       <div class="ref-dialog__mask" @click="docsExpanded = false" />
-      <div class="ref-dialog__panel premium-card">
+      <div class="ref-dialog__panel surface-card">
         <div class="ref-dialog__head">
           <div class="ref-dialog__title-wrap">
-            <div class="ref-dialog__title">引用内容</div>
-            <div class="ref-dialog__subtitle">共 {{ item.referenceCount || 0 }} 条引用</div>
+            <div class="ref-dialog__title">{{ t('image.references.title', '引用内容') }}</div>
+            <div class="ref-dialog__subtitle">{{ t('image.references.subtitle', '共 {count} 条引用', { count: item.referenceCount || 0 }) }}</div>
           </div>
-          <button class="ref-dialog__icon-btn" title="关闭" @click="closeDocs">
+          <button class="ref-dialog__icon-btn" :title="t('image.references.closeButton', '关闭')" @click="closeDocs">
             <span aria-hidden="true">✕</span>
           </button>
         </div>
 
-        <div v-if="item.referencesLoading" class="minor-text">正在查找引用…</div>
+        <div v-if="item.referencesLoading" class="minor-text">{{ t('image.references.loading', '正在查找引用…') }}</div>
 
-        <div v-else-if="!item.references?.length" class="minor-text">未找到引用</div>
+        <div v-else-if="!item.references?.length" class="minor-text">{{ t('image.references.empty', '未找到引用') }}</div>
 
         <div v-else class="ref-dialog__list">
           <div
@@ -103,7 +107,7 @@
             class="ref-dialog__item"
             role="button"
             tabindex="0"
-            title="点击跳转到引用块"
+            :title="t('image.references.openBlock', '点击跳转到引用块')"
             @click="openReference(doc)"
             @keydown.enter.prevent="openReference(doc)"
             @keydown.space.prevent="openReference(doc)"
@@ -112,7 +116,7 @@
               <div class="ref-dialog__path">{{ doc.hpath || doc.path || doc.rootId || doc.blockId }}</div>
               <div class="ref-dialog__content">{{ doc.markdown || doc.content || doc.originalUrl }}</div>
             </div>
-            <button class="ref-dialog__icon-btn ref-dialog__copy" title="复制" @click.stop="copyReference(doc)">
+            <button class="ref-dialog__icon-btn ref-dialog__copy" :title="t('image.references.copyTitle', '复制')" @click.stop="copyReference(doc)">
               <span aria-hidden="true">⧉</span>
             </button>
           </div>
@@ -127,7 +131,10 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { openTab, showMessage } from 'siyuan'
 import { queryAssetReferences } from '@/api/index'
 import { usePlugin } from '@/main'
-import type { ImageItem, ImageReferenceItem, ImageSourceType } from '@/types/plugin'
+import type { ImageItem, ImageReferenceItem } from '@/types/plugin'
+import { copyTextToClipboard } from '@/utils/clipboard'
+import { useI18n } from '@/utils/i18n'
+import { getCfBedBridge } from '@/utils/plugin'
 
 const props = defineProps<{
   item: ImageItem
@@ -141,6 +148,7 @@ defineEmits<{
   (e: 'cancel-replace', item: ImageItem): void
 }>()
 
+const { t, sourceTypeLabel } = useI18n()
 const docsExpanded = defineModel<boolean>('docsExpanded', { default: false })
 const localSelected = computed({
   get: () => props.item.selected,
@@ -148,14 +156,6 @@ const localSelected = computed({
     props.item.selected = value
   },
 })
-
-function sourceTypeLabel(type: ImageSourceType) {
-  if (type === 'local')
-    return '本'
-  if (type === 'own')
-    return '外'
-  return '外'
-}
 
 function toMarkdown(url: string) {
   return `![](${url})`
@@ -176,11 +176,11 @@ function handleKeydown(event: KeyboardEvent) {
 
 async function copyText(text: string) {
   try {
-    await navigator.clipboard.writeText(text)
-    showMessage('已复制到剪贴板')
+    await copyTextToClipboard(text)
+    showMessage(t('image.message.copySuccess', '已复制到剪贴板'))
   }
   catch {
-    showMessage('复制失败')
+    showMessage(t('image.message.copyFailed', '复制失败'))
   }
 }
 
@@ -192,7 +192,7 @@ function openReference(doc: ImageReferenceItem) {
   try {
     const plugin = usePlugin()
     if (!plugin?.app) {
-      showMessage('未获取到插件上下文，无法跳转')
+      showMessage(t('image.message.noContext', '未获取到插件上下文，无法跳转'))
       return
     }
 
@@ -211,10 +211,10 @@ function openReference(doc: ImageReferenceItem) {
       removeCurrentTab: false,
     })
 
-    window._sy_plugin_sample?.togglePanel?.(false)
+    getCfBedBridge()?.togglePanel?.(false)
   }
   catch {
-    showMessage('跳转失败')
+    showMessage(t('image.message.openFailed', '跳转失败'))
   }
 }
 
@@ -249,7 +249,7 @@ watch(docsExpanded, (value) => {
       const fallbackReferences = createFallbackReferences(props.item)
       props.item.references = fallbackReferences
       props.item.referenceCount = fallbackReferences.length
-      showMessage('查找引用失败')
+      showMessage(t('image.message.queryRefsFailed', '查找引用失败'))
     })
     .finally(() => {
       props.item.referencesLoading = false

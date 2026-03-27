@@ -1,30 +1,32 @@
 import { Plugin } from 'siyuan'
-import { createApp } from 'vue'
+import { createApp, type App as VueApp } from 'vue'
 import App from './App.vue'
 
-let plugin = null
+let plugin: Plugin | null = null
 export function usePlugin(pluginProps?: Plugin): Plugin {
-  if (pluginProps) {
+  if (pluginProps)
     plugin = pluginProps
-  }
-  if (!plugin && !pluginProps) {
-    console.error('need bind plugin')
-  }
+  if (!plugin)
+    throw new Error('need bind plugin')
   return plugin
 }
 
 
-let app = null
+let app: VueApp<Element> | null = null
 let root: HTMLDivElement | null = null
-export function init(plugin: Plugin) {
-  usePlugin(plugin)
+export function init(pluginInstance: Plugin) {
+  usePlugin(pluginInstance)
+
+  if (root)
+    destroy()
 
   root = document.createElement('div')
   root.classList.add('plugin-cfbed-app')
-  root.id = `${plugin.name}-root`
+  root.id = `${pluginInstance.name}-root`
+  document.body.appendChild(root)
+
   app = createApp(App)
   app.mount(root)
-  document.body.appendChild(root)
 }
 
 export function destroy() {

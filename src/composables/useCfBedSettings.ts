@@ -1,85 +1,75 @@
 import { computed, ref } from 'vue'
-import { pushErrMsg } from '@/api'
-import type { CfBedConfig, PluginSettings } from '@/types/plugin'
+import { pushErrMsg } from '@/api/index'
+import { usePlugin } from '@/main'
+import type { PluginSettings } from '@/types/plugin'
+import { useI18n } from '@/utils/i18n'
+import { cloneSettings, createDefaultConfig, createDefaultSettings, getDomainFromHost, normalizeSettings } from '@/utils/plugin'
 
-const STORAGE_KEY = 'cfbed-plugin-settings'
-
-function createDefaultConfig(): CfBedConfig {
-  const id = `cfg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  return {
-    id,
-    name: '默认配置',
-    host: '',
-    token: '',
-    authCode: '',
-    uploadChannel: 'telegram',
-    channelName: '',
-    uploadFolder: '',
-    uploadNameType: 'default',
-    returnFormat: 'default',
-    autoRetry: false,
-    serverCompress: false,
-    chunkSizeMB: 5,
-    publicDomain: '',
-    enabled: true,
-  }
-}
-
-function createDefaultSettings(): PluginSettings {
-  const config = createDefaultConfig()
-  return {
-    activeConfigId: config.id,
-    autoReplace: false,
-    themeMode: 'auto',
-    ownDomainsText: '',
-    configs: [config],
-  }
+type SettingsPlugin = {
+  settings?: PluginSettings
+  saveSettings?: (settings: PluginSettings) => Promise<void>
 }
 
 export function useCfBedSettings() {
-  const settings = ref<PluginSettings>(loadSettings())
+  const plugin = usePlugin() as SettingsPlugin
+  const { t } = useI18n()
+  const settings = ref<PluginSettings>(cloneSettings(normalizeSettings(plugin.settings || createDefaultSettings())))
+  let persistTimer: number | undefined
+  let pendingSnapshot: PluginSettings | null = null
 
   const configOptions = computed(() =>
     settings.value.configs.map(item => ({
       value: item.id,
-      text: item.name || '未命名配置',
+      text: item.name || t('common.untitledConfig', '未命名配置'),
     })),
   )
 
   const ownDomains = computed(() =>
-    settings.value.ownDomainsText
-      .split('\n')
-      .map(item => item.trim())
-      .filter(Boolean),
+    Array.from(new Set([
+      ...settings.value.ownDomainsText
+        .split('\n')
+        .map(item => item.trim().toLowerCase())
+        .filter(Boolean),
+      ...settings.value.configs.flatMap(item => [item.host, item.publicDomain])
+        .map(item => getDomainFromHost(item))
+        .filter(Boolean),
+    ])),
   )
 
-  function loadSettings() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (!raw)
-        return createDefaultSettings()
+  function persistSettings() {
+    settings.value = normalizeSettings(settings.value)
 
-      const parsed = JSON.parse(raw) as PluginSettings
-      if (!parsed.configs?.length)
-        return createDefaultSettings()
-      if (!parsed.activeConfigId)
-        parsed.activeConfigId = parsed.configs[0].id
-      if (!parsed.themeMode)
-        parsed.themeMode = 'auto'
-      return parsed
-    }
-    catch {
-      return createDefaultSettings()
-    }
+    if (persistTimer)
+      window.clearTimeout(persistTimer)
+
+    const snapshot = cloneSettings(settings.value)
+    pendingSnapshot = snapshot
+    persistTimer = window.setTimeout(async () => {
+      try {
+        await plugin.saveSettings?.(snapshot)
+        pendingSnapshot = null
+      }
+      catch (error: any) {
+        pushErrMsg(error?.message || t('settings.error.saveFailed', '保存配置失败'))
+      }
+    }, 160)
   }
 
-  function persistSettings() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value))
+  async function flushSettings() {
+    if (!pendingSnapshot)
+      return
+
+    if (persistTimer)
+      window.clearTimeout(persistTimer)
+
+    const snapshot = pendingSnapshot
+    pendingSnapshot = null
+    await plugin.saveSettings?.(snapshot)
   }
 
   function addConfig() {
     const config = createDefaultConfig()
-    config.name = `配置 ${settings.value.configs.length + 1}`
+    config.name = t('settings.defaultConfigName', '配置 {index}', { index: settings.value.configs.length + 1 })
     settings.value.configs.push(config)
     settings.value.activeConfigId = config.id
     persistSettings()
@@ -87,7 +77,7 @@ export function useCfBedSettings() {
 
   function removeConfig(id: string) {
     if (settings.value.configs.length <= 1) {
-      throw new Error('至少保留一个配置')
+      throw new Error(t('settings.error.keepOneConfig', '至少保留一个配置'))
     }
 
     settings.value.configs = settings.value.configs.filter(item => item.id !== id)
@@ -104,8 +94,8 @@ export function useCfBedSettings() {
       || settings.value.configs.find(item => item.enabled)
 
     if (!config) {
-      pushErrMsg('没有可用的启用配置')
-      throw new Error('没有可用的启用配置')
+      pushErrMsg(t('settings.error.noEnabledConfig', '没有可用的启用配置'))
+      throw new Error(t('settings.error.noEnabledConfig', '没有可用的启用配置'))
     }
 
     return config
@@ -116,6 +106,7 @@ export function useCfBedSettings() {
     configOptions,
     ownDomains,
     persistSettings,
+    flushSettings,
     addConfig,
     removeConfig,
     activeConfig,

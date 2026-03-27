@@ -1,11 +1,11 @@
 import { computed, ref } from 'vue'
 import { showMessage } from 'siyuan'
-import { pushErrMsg } from '@/api'
+import { pushErrMsg } from '@/api/index'
 import { runWithConcurrency } from '@/services/async-pool'
 import { fetchFileFromImage, formatUploadError, uploadFileToCfBed } from '@/services/cfbed-upload'
+import { useI18n } from '@/utils/i18n'
 import { formatDateTime, formatTime } from '@/utils/time'
-import type { BatchUploadScope, CfBedConfig, ImageItem, PluginSettings, UploadTaskSummary } from '@/types/plugin'
-import type { QueueUploadItem } from '@/components/cfbed/UploadQueueItem.vue'
+import type { BatchUploadScope, CfBedConfig, ImageItem, PluginSettings, QueueUploadItem, UploadTaskSummary } from '@/types/plugin'
 
 type UploadLogType = 'info' | 'success' | 'error'
 
@@ -17,17 +17,22 @@ type UploadLogItem = {
 }
 
 type UseUploaderOptions = {
-  settings: PluginSettings
+  settings: { value: PluginSettings }
   filteredImages: { value: ImageItem[] }
   activeConfig: () => CfBedConfig
   refreshImages: () => Promise<void>
-  replaceUploadedLinks: () => Promise<void>
+  replaceUploadedLinks: (targetImages?: ImageItem[]) => Promise<void>
   patchImage: (id: string, patch: Partial<ImageItem>) => void
   addMapping?: (item: any) => void
-  findSuccessfulMapping?: (sourceUrl: string) => { targetUrl: string } | undefined
+  findSuccessfulMapping?: (sourceUrl: string, sourceKey?: string) => { targetUrl: string } | undefined
+}
+
+type SuccessfulMapping = {
+  targetUrl: string
 }
 
 export function useUploader(options: UseUploaderOptions) {
+  const { t } = useI18n()
   const uploadQueue = ref<QueueUploadItem[]>([])
   const uploadLogs = ref<UploadLogItem[]>([])
   const isDragging = ref(false)
@@ -40,6 +45,16 @@ export function useUploader(options: UseUploaderOptions) {
   const imageSuccessCount = ref(0)
 
   const hasRunningTask = computed(() => runningControllers.size > 0)
+
+  function resolveActiveConfig() {
+    try {
+      return options.activeConfig()
+    }
+    catch (error: any) {
+      pushErrMsg(error?.message || t('uploader.error.configUnavailable', '配置不可用'))
+      return null
+    }
+  }
 
   function addUploadLog(type: UploadLogType, message: string) {
     uploadLogs.value.unshift({
@@ -66,12 +81,16 @@ export function useUploader(options: UseUploaderOptions) {
     }
   }
 
+  function getQueueSourceKey(file: File) {
+    return `queue:${file.name}:${file.size}:${file.lastModified}`
+  }
+
   function appendFiles(files: File[]) {
     const imageFiles = files.filter(file => file.type.startsWith('image/'))
     const items = imageFiles.map(createQueueItem)
     uploadQueue.value.push(...items)
     if (items.length) {
-      addUploadLog('info', `已加入 ${items.length} 个待上传文件`)
+      addUploadLog('info', t('uploader.log.filesAdded', '已加入 {count} 个待上传文件', { count: items.length }))
     }
   }
 
@@ -89,7 +108,7 @@ export function useUploader(options: UseUploaderOptions) {
 
   function clearUploadQueue() {
     if (queueUploading.value) {
-      pushErrMsg('正在上传中，不能清空队列')
+      pushErrMsg(t('uploader.error.cannotClearQueue', '正在上传中，不能清空队列'))
       return
     }
     uploadQueue.value = []
@@ -97,6 +116,66 @@ export function useUploader(options: UseUploaderOptions) {
 
   function patchQueueItem(id: string, patch: Partial<QueueUploadItem>) {
     uploadQueue.value = uploadQueue.value.map(item => item.id === id ? { ...item, ...patch } : item)
+  }
+
+  function getQueueMapping(item: QueueUploadItem) {
+    return options.findSuccessfulMapping?.(item.name, getQueueSourceKey(item.file))
+  }
+
+  function getImageMapping(item: ImageItem) {
+    return options.findSuccessfulMapping?.(item.url)
+  }
+
+  function applyQueueMapping(item: QueueUploadItem, mapped: SuccessfulMapping, message = t('uploader.message.reusedLink', '已复用历史上传链接')) {
+    patchQueueItem(item.id, {
+      status: 'success',
+      progress: 100,
+      uploadedUrl: mapped.targetUrl,
+      message,
+    })
+    addUploadLog('success', t('uploader.log.queueHitHistory', '{name} 命中历史记录，已跳过上传', { name: item.name }))
+  }
+
+  function applyImageMapping(item: ImageItem, mapped: SuccessfulMapping, message = t('uploader.message.reusedLink', '已复用历史上传链接')) {
+    options.patchImage(item.id, {
+      uploadedUrl: mapped.targetUrl,
+      status: 'success',
+      progress: 100,
+      message,
+    })
+    addUploadLog('success', t('uploader.log.imageHitHistory', '图片命中历史记录，已跳过上传：{url}', { url: item.url }))
+  }
+
+  function reuseQueueMappings(items: QueueUploadItem[]) {
+    const reused = new Set<string>()
+
+    for (const item of items) {
+      const mapped = getQueueMapping(item)
+      if (!mapped)
+        continue
+
+      reused.add(item.id)
+      applyQueueMapping(item, mapped)
+    }
+
+    return reused
+  }
+
+  function reuseImageMappings(items: ImageItem[], countAsSuccess = false) {
+    const reused = new Set<string>()
+
+    for (const item of items) {
+      const mapped = getImageMapping(item)
+      if (!mapped)
+        continue
+
+      reused.add(item.id)
+      applyImageMapping(item, mapped)
+      if (countAsSuccess)
+        imageSuccessCount.value++
+    }
+
+    return reused
   }
 
   function makeTaskKey(prefix: string, unique: string) {
@@ -114,7 +193,7 @@ export function useUploader(options: UseUploaderOptions) {
         return {
           ...item,
           status: 'cancelled',
-          message: '上传已取消',
+          message: t('uploader.message.cancelled', '上传已取消'),
         }
       }
       return item
@@ -124,12 +203,12 @@ export function useUploader(options: UseUploaderOptions) {
       if (item.status === 'queued' || item.status === 'preparing' || item.status === 'uploading') {
         options.patchImage(item.id, {
           status: 'cancelled',
-          message: '上传已取消',
+          message: t('uploader.message.cancelled', '上传已取消'),
         })
       }
     }
 
-    addUploadLog('info', '已取消所有上传任务')
+    addUploadLog('info', t('uploader.log.cancelAll', '已取消所有上传任务'))
   }
 
   function cancelQueueUpload(queueId: string) {
@@ -141,9 +220,9 @@ export function useUploader(options: UseUploaderOptions) {
     }
     patchQueueItem(queueId, {
       status: 'cancelled',
-      message: '上传已取消',
+      message: t('uploader.message.cancelled', '上传已取消'),
     })
-    addUploadLog('info', `已取消队列文件上传：${queueId}`)
+    addUploadLog('info', t('uploader.log.cancelQueue', '已取消队列文件上传：{id}', { id: queueId }))
   }
 
   function cancelImageUpload(imageId: string) {
@@ -155,9 +234,9 @@ export function useUploader(options: UseUploaderOptions) {
     }
     options.patchImage(imageId, {
       status: 'cancelled',
-      message: '上传已取消',
+      message: t('uploader.message.cancelled', '上传已取消'),
     })
-    addUploadLog('info', `已取消图片上传：${imageId}`)
+    addUploadLog('info', t('uploader.log.cancelImage', '已取消图片上传：{id}', { id: imageId }))
   }
 
   async function uploadOneQueueItem(item: QueueUploadItem, config: CfBedConfig) {
@@ -172,7 +251,7 @@ export function useUploader(options: UseUploaderOptions) {
     })
 
     try {
-      addUploadLog('info', `开始上传：${item.name}`)
+      addUploadLog('info', t('uploader.log.startQueueUpload', '开始上传：{name}', { name: item.name }))
       const uploadedUrl = await uploadFileToCfBed(item.file, config, {
         onLog: addUploadLog,
         signal: controller.signal,
@@ -189,12 +268,13 @@ export function useUploader(options: UseUploaderOptions) {
         status: 'success',
         progress: 100,
         uploadedUrl,
-        message: '上传成功',
+        message: t('uploader.message.uploadSuccess', '上传成功'),
       })
 
       options.addMapping?.({
         id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         sourceUrl: item.name,
+        sourceKey: getQueueSourceKey(item.file),
         targetUrl: uploadedUrl,
         sourceType: 'queue',
         fileName: item.name,
@@ -202,7 +282,7 @@ export function useUploader(options: UseUploaderOptions) {
         time: formatDateTime(),
       })
 
-      addUploadLog('success', `${item.name} 上传成功：${uploadedUrl}`)
+      addUploadLog('success', t('uploader.log.queueUploadSuccess', '{name} 上传成功：{url}', { name: item.name, url: uploadedUrl }))
     }
     catch (error: any) {
       const detail = formatUploadError(error)
@@ -214,6 +294,7 @@ export function useUploader(options: UseUploaderOptions) {
       options.addMapping?.({
         id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         sourceUrl: item.name,
+        sourceKey: getQueueSourceKey(item.file),
         targetUrl: '',
         sourceType: 'queue',
         fileName: item.name,
@@ -221,9 +302,9 @@ export function useUploader(options: UseUploaderOptions) {
         time: formatDateTime(),
       })
 
-      addUploadLog(error?.name === 'AbortError' ? 'info' : 'error', `${item.name} 上传失败：${detail}`)
+      addUploadLog(error?.name === 'AbortError' ? 'info' : 'error', t('uploader.log.queueUploadFailed', '{name} 上传失败：{detail}', { name: item.name, detail }))
       if (error?.name !== 'AbortError') {
-        pushErrMsg(`${item.name} 上传失败：${detail}`)
+        pushErrMsg(t('uploader.notify.queueUploadFailed', '{name} 上传失败：{detail}', { name: item.name, detail }))
       }
     }
     finally {
@@ -233,21 +314,13 @@ export function useUploader(options: UseUploaderOptions) {
 
   async function uploadQueuedFiles() {
     if (!uploadQueue.value.length) {
-      pushErrMsg('请先选择图片')
+      pushErrMsg(t('uploader.error.selectImagesFirst', '请先选择图片'))
       return
     }
 
-    let config: CfBedConfig
-    try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
+    const config = resolveActiveConfig()
+    if (!config)
       return
-    }
-
-    queueUploading.value = true
-    queueSuccessCount.value = 0
 
     const pendingItems = uploadQueue.value.filter(item =>
       item.status === 'idle'
@@ -255,21 +328,16 @@ export function useUploader(options: UseUploaderOptions) {
       || item.status === 'cancelled',
     )
 
-    const reusableItems = pendingItems.filter(item => options.findSuccessfulMapping?.(item.name))
-    for (const item of reusableItems) {
-      const mapped = options.findSuccessfulMapping?.(item.name)
-      if (!mapped)
-        continue
-      patchQueueItem(item.id, {
-        status: 'success',
-        progress: 100,
-        uploadedUrl: mapped.targetUrl,
-        message: '已复用历史上传链接',
-      })
-      addUploadLog('success', `${item.name} 命中历史记录，已跳过上传`)
+    if (!pendingItems.length) {
+      pushErrMsg(t('uploader.error.noQueueFiles', '没有可上传的队列文件'))
+      return
     }
 
-    const uploadItems = pendingItems.filter(item => !options.findSuccessfulMapping?.(item.name))
+    queueUploading.value = true
+    queueSuccessCount.value = 0
+
+    const reusedQueueIds = reuseQueueMappings(pendingItems)
+    const uploadItems = pendingItems.filter(item => !reusedQueueIds.has(item.id))
 
     for (const item of uploadItems) {
       patchQueueItem(item.id, {
@@ -284,7 +352,10 @@ export function useUploader(options: UseUploaderOptions) {
         await uploadOneQueueItem(item, config)
       })
 
-      showMessage(`上传完成：${queueSuccessCount.value + reusableItems.length}/${pendingItems.length}`)
+      showMessage(t('uploader.message.uploadComplete', '上传完成：{done}/{total}', {
+        done: queueSuccessCount.value + reusedQueueIds.size,
+        total: pendingItems.length,
+      }))
       await options.refreshImages()
     }
     finally {
@@ -298,14 +369,15 @@ export function useUploader(options: UseUploaderOptions) {
     if (!target)
       return
 
-    let config: CfBedConfig
-    try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
+    const mapped = getQueueMapping(target)
+    if (mapped) {
+      applyQueueMapping(target, mapped)
       return
     }
+
+    const config = resolveActiveConfig()
+    if (!config)
+      return
 
     await uploadOneQueueItem(target, config)
   }
@@ -318,11 +390,11 @@ export function useUploader(options: UseUploaderOptions) {
     options.patchImage(item.id, {
       status: 'preparing',
       progress: 0,
-      message: '正在读取图片',
+      message: t('uploader.message.preparingImage', '正在读取图片'),
     })
 
     try {
-      addUploadLog('info', `开始准备图片：${item.url}`)
+      addUploadLog('info', t('uploader.log.prepareImage', '开始准备图片：{url}', { url: item.url }))
       const file = await fetchFileFromImage(item.url, controller.signal)
 
       options.patchImage(item.id, {
@@ -331,7 +403,7 @@ export function useUploader(options: UseUploaderOptions) {
         message: '',
       })
 
-      addUploadLog('info', `开始上传图片：${item.url}`)
+      addUploadLog('info', t('uploader.log.startImageUpload', '开始上传图片：{url}', { url: item.url }))
       const uploadedUrl = await uploadFileToCfBed(file, config, {
         onLog: addUploadLog,
         signal: controller.signal,
@@ -349,7 +421,7 @@ export function useUploader(options: UseUploaderOptions) {
         uploadedUrl,
         status: 'success',
         progress: 100,
-        message: '上传成功',
+        message: t('uploader.message.uploadSuccess', '上传成功'),
       })
 
       options.addMapping?.({
@@ -362,7 +434,10 @@ export function useUploader(options: UseUploaderOptions) {
         time: formatDateTime(),
       })
 
-      addUploadLog('success', `图片上传成功：${item.url} -> ${uploadedUrl}`)
+      addUploadLog('success', t('uploader.log.imageUploadSuccess', '图片上传成功：{from} -> {to}', {
+        from: item.url,
+        to: uploadedUrl,
+      }))
     }
     catch (error: any) {
       const message = formatUploadError(error)
@@ -381,7 +456,10 @@ export function useUploader(options: UseUploaderOptions) {
         time: formatDateTime(),
       })
 
-      addUploadLog(error?.name === 'AbortError' ? 'info' : 'error', `图片上传失败：${item.url}，原因：${message}`)
+      addUploadLog(error?.name === 'AbortError' ? 'info' : 'error', t('uploader.log.imageUploadFailed', '图片上传失败：{url}，原因：{reason}', {
+        url: item.url,
+        reason: message,
+      }))
     }
     finally {
       runningControllers.delete(taskKey)
@@ -407,38 +485,19 @@ export function useUploader(options: UseUploaderOptions) {
   async function uploadSelectedByScope(scope: BatchUploadScope = 'all') {
     const selected = filterImagesByScope(scope)
     if (!selected.length) {
-      pushErrMsg('没有符合条件的图片可上传')
+      pushErrMsg(t('uploader.error.noImagesForScope', '没有符合条件的图片可上传'))
       return
     }
 
-    let config: CfBedConfig
-    try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
+    const config = resolveActiveConfig()
+    if (!config)
       return
-    }
 
     imageUploading.value = true
     imageSuccessCount.value = 0
 
-    const reusableImages = selected.filter(item => options.findSuccessfulMapping?.(item.url))
-    for (const item of reusableImages) {
-      const mapped = options.findSuccessfulMapping?.(item.url)
-      if (!mapped)
-        continue
-      options.patchImage(item.id, {
-        uploadedUrl: mapped.targetUrl,
-        status: 'success',
-        progress: 100,
-        message: '已复用历史上传链接',
-      })
-      addUploadLog('success', `图片命中历史记录，已跳过上传：${item.url}`)
-      imageSuccessCount.value++
-    }
-
-    const uploadImages = selected.filter(item => !options.findSuccessfulMapping?.(item.url))
+    const reusedImageIds = reuseImageMappings(selected, true)
+    const uploadImages = selected.filter(item => !reusedImageIds.has(item.id))
 
     for (const item of uploadImages) {
       options.patchImage(item.id, {
@@ -453,9 +512,13 @@ export function useUploader(options: UseUploaderOptions) {
         await uploadOneImage(item, config)
       })
 
-      showMessage(`上传完成：${imageSuccessCount.value}/${selected.length}`)
-      if (options.settings.autoReplace && imageSuccessCount.value > 0) {
-        await options.replaceUploadedLinks()
+      showMessage(t('uploader.message.uploadComplete', '上传完成：{done}/{total}', {
+        done: imageSuccessCount.value,
+        total: selected.length,
+      }))
+      if (options.settings.value.autoReplace && imageSuccessCount.value > 0) {
+        await options.replaceUploadedLinks(selected)
+        await options.refreshImages()
       }
     }
     finally {
@@ -469,26 +532,15 @@ export function useUploader(options: UseUploaderOptions) {
   }
 
   async function retryImage(item: ImageItem) {
-    const mapped = options.findSuccessfulMapping?.(item.url)
+    const mapped = getImageMapping(item)
     if (mapped?.targetUrl) {
-      options.patchImage(item.id, {
-        uploadedUrl: mapped.targetUrl,
-        status: 'success',
-        progress: 100,
-        message: '已复用历史上传链接',
-      })
-      addUploadLog('success', `图片命中历史记录，已跳过上传：${item.url}`)
+      applyImageMapping(item, mapped)
       return
     }
 
-    let config: CfBedConfig
-    try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
+    const config = resolveActiveConfig()
+    if (!config)
       return
-    }
 
     await uploadOneImage(item, config)
   }
@@ -500,38 +552,38 @@ export function useUploader(options: UseUploaderOptions) {
     )
 
     if (!failed.length) {
-      pushErrMsg('没有可重试的失败图片')
+      pushErrMsg(t('uploader.error.noFailedImages', '没有可重试的失败图片'))
       return
     }
 
-    let config: CfBedConfig
+    const config = resolveActiveConfig()
+    if (!config)
+      return
+
+    imageUploading.value = true
+    imageSuccessCount.value = 0
+
+    const reusedImageIds = reuseImageMappings(failed, true)
+    const retryItems = failed.filter(item => !reusedImageIds.has(item.id))
+
     try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
-      return
-    }
-
-    const reusableFailed = failed.filter(item => options.findSuccessfulMapping?.(item.url))
-    for (const item of reusableFailed) {
-      const mapped = options.findSuccessfulMapping?.(item.url)
-      if (!mapped)
-        continue
-      options.patchImage(item.id, {
-        uploadedUrl: mapped.targetUrl,
-        status: 'success',
-        progress: 100,
-        message: '已复用历史上传链接',
+      await runWithConcurrency(retryItems, uploadConcurrency.value, async (item) => {
+        await uploadOneImage(item, config)
       })
-      addUploadLog('success', `图片命中历史记录，已跳过上传：${item.url}`)
+
+      showMessage(t('uploader.message.retryComplete', '重试完成：{done}/{total}', {
+        done: imageSuccessCount.value,
+        total: failed.length,
+      }))
+      if (options.settings.value.autoReplace && imageSuccessCount.value > 0) {
+        await options.replaceUploadedLinks(failed)
+        await options.refreshImages()
+      }
     }
-
-    const retryItems = failed.filter(item => !options.findSuccessfulMapping?.(item.url))
-
-    await runWithConcurrency(retryItems, uploadConcurrency.value, async (item) => {
-      await uploadOneImage(item, config)
-    })
+    finally {
+      imageUploading.value = false
+      imageSuccessCount.value = 0
+    }
   }
 
   const queueSummary = computed(() => {
@@ -545,22 +597,34 @@ export function useUploader(options: UseUploaderOptions) {
   async function retryFailedQueueItems() {
     const failed = uploadQueue.value.filter(item => item.status === 'error' || item.status === 'cancelled')
     if (!failed.length) {
-      pushErrMsg('没有可重试的队列文件')
+      pushErrMsg(t('uploader.error.noFailedQueueFiles', '没有可重试的队列文件'))
       return
     }
 
-    let config: CfBedConfig
+    const config = resolveActiveConfig()
+    if (!config)
+      return
+
+    queueUploading.value = true
+    queueSuccessCount.value = 0
+
+    const reusedQueueIds = reuseQueueMappings(failed)
+    const retryItems = failed.filter(item => !reusedQueueIds.has(item.id))
+
     try {
-      config = options.activeConfig()
-    }
-    catch (error: any) {
-      pushErrMsg(error?.message || '配置不可用')
-      return
-    }
+      await runWithConcurrency(retryItems, uploadConcurrency.value, async (item) => {
+        await uploadOneQueueItem(item, config)
+      })
 
-    await runWithConcurrency(failed, uploadConcurrency.value, async (item) => {
-      await uploadOneQueueItem(item, config)
-    })
+      showMessage(t('uploader.message.retryComplete', '重试完成：{done}/{total}', {
+        done: queueSuccessCount.value + reusedQueueIds.size,
+        total: failed.length,
+      }))
+    }
+    finally {
+      queueUploading.value = false
+      queueSuccessCount.value = 0
+    }
   }
 
   const taskSummary = computed<UploadTaskSummary>(() => {

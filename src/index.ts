@@ -7,54 +7,23 @@ import {
 import '@/index.scss'
 import PluginInfoString from '@/../plugin.json'
 import { destroy, init } from '@/main'
-import type { CfBedConfig, PluginSettings } from '@/types/plugin'
-
-const STORAGE_NAME = 'settings.json'
-
-function createDefaultConfig(): CfBedConfig {
-  return {
-    id: `cfg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: '默认图床',
-    host: '',
-    token: '',
-    authCode: '',
-    uploadChannel: 'telegram',
-    channelName: '',
-    uploadFolder: '',
-    uploadNameType: 'default',
-    returnFormat: 'default',
-    autoRetry: true,
-    serverCompress: true,
-    chunkSizeMB: 20,
-    publicDomain: '',
-    enabled: true,
-  }
-}
-
-function getDefaultSettings(): PluginSettings {
-  const defaultConfig = createDefaultConfig()
-  return {
-    activeConfigId: defaultConfig.id,
-    autoReplace: false,
-    themeMode: 'auto',
-    ownDomainsText: '',
-    configs: [defaultConfig],
-  }
-}
+import type { PanelTab, PluginSettings } from '@/types/plugin'
+import { CFBED_SETTINGS_STORAGE, createDefaultSettings, getCfBedBridge, normalizeSettings } from '@/utils/plugin'
 
 let PluginInfo = {
   version: '',
 }
 try {
   PluginInfo = PluginInfoString
-} catch (err) {
-  console.log('Plugin info parse error: ', err)
+}
+catch {
+  console.log('Plugin info parse error')
 }
 const {
   version,
 } = PluginInfo
 
-export default class PluginSample extends Plugin {
+export default class CfBedPlugin extends Plugin {
   // Run as mobile
   public isMobile: boolean
   // Run in browser
@@ -67,7 +36,11 @@ export default class PluginSample extends Plugin {
   public isInWindow: boolean
   public platform: SyFrontendTypes
   public readonly version = version
-  public settings: PluginSettings = getDefaultSettings()
+  public settings: PluginSettings = createDefaultSettings()
+
+  private text(key: string, fallback: string) {
+    return this.i18n?.[key] || fallback
+  }
 
   async onload() {
     const frontEnd = getFrontend()
@@ -83,18 +56,20 @@ export default class PluginSample extends Plugin {
       require("@electron/remote")
         .require("@electron/remote/main")
       this.isElectron = true
-    } catch (err) {
+    }
+    catch {
       this.isElectron = false
     }
 
     this.settings = await this.loadSettings()
     this.initSetting()
+    this.initCommands()
 
     this.addTopBar({
       icon: 'iconImage',
       title: this.i18n.addTopBarIcon || 'CloudFlare ImgBed',
       callback: () => {
-        window._sy_plugin_sample?.togglePanel?.()
+        getCfBedBridge()?.togglePanel?.()
       },
     })
 
@@ -106,34 +81,44 @@ export default class PluginSample extends Plugin {
   }
 
   openSetting() {
-    window._sy_plugin_sample?.openSetting?.()
+    getCfBedBridge()?.openSetting?.()
   }
 
   async loadSettings(): Promise<PluginSettings> {
-    const stored = await this.loadData(STORAGE_NAME)
-    const defaults = getDefaultSettings()
-    const configs = Array.isArray(stored?.configs) && stored.configs.length
-      ? stored.configs.map((item: Partial<CfBedConfig>) => ({
-          ...createDefaultConfig(),
-          ...item,
-        }))
-      : defaults.configs
-
-    const activeConfigId = stored?.activeConfigId && configs.some(item => item.id === stored.activeConfigId)
-      ? stored.activeConfigId
-      : configs[0].id
-
-    return {
-      ...defaults,
-      ...stored,
-      activeConfigId,
-      configs,
-    }
+    return normalizeSettings(await this.loadData(CFBED_SETTINGS_STORAGE))
   }
 
   async saveSettings(settings: PluginSettings) {
-    this.settings = settings
-    await this.saveData(STORAGE_NAME, settings)
+    const next = normalizeSettings(settings)
+    this.settings = next
+    await this.saveData(CFBED_SETTINGS_STORAGE, next)
+  }
+
+  private initCommands() {
+    const openTabCommand = (tab: PanelTab, langKey: string, langText: string) => {
+      this.addCommand({
+        langKey,
+        langText,
+        hotkey: '',
+        callback: () => {
+          getCfBedBridge()?.openPanel?.(tab)
+        },
+      })
+    }
+
+    openTabCommand('images', 'openCfBedImages', this.text('command.openImages', '打开 CloudFlare ImgBed 图片面板'))
+    openTabCommand('settings', 'openCfBedSettings', this.text('command.openSettings', '打开 CloudFlare ImgBed 配置'))
+    openTabCommand('upload', 'openCfBedUploadQueue', this.text('command.openUpload', '打开 CloudFlare ImgBed 上传队列'))
+    openTabCommand('misc', 'openCfBedMappings', this.text('command.openMappings', '打开 CloudFlare ImgBed 迁移记录'))
+
+    this.addCommand({
+      langKey: 'refreshCfBedCurrentDoc',
+      langText: this.text('command.refreshCurrentDoc', '刷新并打开 CloudFlare ImgBed 当前文档图片'),
+      hotkey: '',
+      callback: () => {
+        getCfBedBridge()?.openPanel?.('images')
+      },
+    })
   }
 
   private initSetting() {
@@ -143,27 +128,49 @@ export default class PluginSample extends Plugin {
 
     const panelButton = document.createElement('button')
     panelButton.className = 'b3-button b3-button--outline'
-    panelButton.textContent = '打开图床管理面板'
-    panelButton.onclick = () => window._sy_plugin_sample?.togglePanel?.(true)
+    panelButton.textContent = this.text('settings.panel.open', '打开图床管理面板')
+    panelButton.onclick = () => getCfBedBridge()?.togglePanel?.(true)
 
     this.setting.addItem({
-      title: '图床面板',
-      description: '查看当前笔记中的图片，并进行筛选、上传与替换。',
+      title: this.text('settings.panel.title', '图床面板'),
+      description: this.text('settings.panel.description', '查看当前笔记中的图片，并进行筛选、上传与替换。'),
       actionElement: panelButton,
     })
 
     const settingButton = document.createElement('button')
     settingButton.className = 'b3-button b3-button--outline'
-    settingButton.textContent = '打开配置面板'
+    settingButton.textContent = this.text('settings.config.open', '打开配置面板')
     settingButton.onclick = () => {
-      window._sy_plugin_sample?.openSetting?.()
-      showMessage('已打开 CloudFlare ImgBed 配置面板')
+      getCfBedBridge()?.openSetting?.()
+      showMessage(this.text('settings.config.opened', '已打开 CloudFlare ImgBed 配置面板'))
     }
 
     this.setting.addItem({
-      title: 'CloudFlare-ImgBed 配置',
-      description: '支持多个配置、自定义自己图床域名、上传后自动替换链接。',
+      title: this.text('settings.config.title', 'CloudFlare-ImgBed 配置'),
+      description: this.text('settings.config.description', '支持多个配置、自定义自己图床域名、上传后自动替换链接。'),
       actionElement: settingButton,
+    })
+
+    const uploadButton = document.createElement('button')
+    uploadButton.className = 'b3-button b3-button--outline'
+    uploadButton.textContent = this.text('settings.upload.open', '打开上传队列')
+    uploadButton.onclick = () => getCfBedBridge()?.openPanel?.('upload')
+
+    this.setting.addItem({
+      title: this.text('settings.upload.title', '本地图片上传'),
+      description: this.text('settings.upload.description', '直接打开上传队列页，拖拽本地图片到当前图床配置。'),
+      actionElement: uploadButton,
+    })
+
+    const mappingsButton = document.createElement('button')
+    mappingsButton.className = 'b3-button b3-button--outline'
+    mappingsButton.textContent = this.text('settings.mappings.open', '打开迁移记录')
+    mappingsButton.onclick = () => getCfBedBridge()?.openPanel?.('misc')
+
+    this.setting.addItem({
+      title: this.text('settings.mappings.title', '迁移记录'),
+      description: this.text('settings.mappings.description', '查看历史上传映射、导出 JSON/CSV，并排查替换结果。'),
+      actionElement: mappingsButton,
     })
   }
 }

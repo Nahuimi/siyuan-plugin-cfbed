@@ -5,7 +5,7 @@
         <div class="queue-item__name">{{ item.name }}</div>
         <div class="minor-text">{{ formatSize(item.size) }}</div>
       </div>
-      <span class="status-pill" :class="`status-pill--${item.status}`">{{ item.message || item.status }}</span>
+      <span class="status-pill" :class="`status-pill--${item.status}`">{{ item.message || uploadStatusLabel(item.status) }}</span>
     </div>
 
     <div class="progress-bar">
@@ -20,30 +20,22 @@
         class="header-btn"
         @click="$emit('retry', item.id)"
       >
-        重试
+        {{ t('common.retry', '重试') }}
       </button>
       <button
         v-if="item.status === 'queued' || item.status === 'preparing' || item.status === 'uploading'"
         class="ui-btn ui-btn--danger"
         @click="$emit('cancel', item.id)"
       >
-        取消
+        {{ t('common.cancel', '取消') }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-export type QueueUploadItem = {
-  id: string
-  file: File
-  name: string
-  size: number
-  status: 'idle' | 'queued' | 'preparing' | 'uploading' | 'success' | 'error' | 'cancelled'
-  progress: number
-  message: string
-  uploadedUrl: string
-}
+import type { QueueUploadItem } from '@/types/plugin'
+import { useI18n } from '@/utils/i18n'
 
 defineProps<{
   item: QueueUploadItem
@@ -53,6 +45,8 @@ defineEmits<{
   (e: 'retry', id: string): void
   (e: 'cancel', id: string): void
 }>()
+
+const { t, uploadStatusLabel } = useI18n()
 
 function formatSize(size: number) {
   if (size < 1024)

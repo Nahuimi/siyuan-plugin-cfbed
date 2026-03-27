@@ -13,8 +13,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import SyButton from '@/components/SiyuanTheme/SyButton.vue'
 import type { UploadLogFilter } from '@/types/plugin'
+import { useI18n } from '@/utils/i18n'
 
 defineProps<{
   modelValue: UploadLogFilter
@@ -24,10 +26,12 @@ defineEmits<{
   (e: 'update:modelValue', value: UploadLogFilter): void
 }>()
 
-const options: Array<{ label: string, value: UploadLogFilter }> = [
-  { label: '全部', value: 'all' },
-  { label: '信息', value: 'info' },
-  { label: '成功', value: 'success' },
-  { label: '失败', value: 'error' },
-]
+const { t } = useI18n()
+
+const options = computed<Array<{ label: string, value: UploadLogFilter }>>(() => [
+  { label: t('log.all', '全部'), value: 'all' },
+  { label: t('log.info', '信息'), value: 'info' },
+  { label: t('log.success', '成功'), value: 'success' },
+  { label: t('log.error', '失败'), value: 'error' },
+])
 </script>

@@ -449,6 +449,14 @@ export async function getDocContent(docId: string): Promise<string> {
 }
 
 /**
+ * 获取可直接回写到文档根块的源码
+ * 使用 getBlockKramdown 避免 exportMdContent 导出的 frontmatter / 标题包装被再次写入正文。
+ */
+export async function getEditableDocContent(docId: string): Promise<string> {
+  return await getBlockKramdown(docId)
+}
+
+/**
  * 更新文档根块 markdown
  * /api/block/updateBlock [5]
  *

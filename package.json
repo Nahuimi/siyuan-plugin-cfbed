@@ -17,7 +17,8 @@
     "release:patch": "node ./release.js --mode=patch",
     "release:minor": "node ./release.js --mode=minor",
     "release:major": "node ./release.js --mode=major",
-    "build": "vite build"
+    "build": "vite build",
+    "lint": "eslint src --ext .ts,.vue --ignore-pattern \"src/**/*.d.ts\" --ignore-pattern \"src/env.d.ts\""
   },
   "dependencies": {
     "vue": "^3.3.8"

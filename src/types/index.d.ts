@@ -122,7 +122,10 @@ interface Window {
     ws: any;
     languages: any;
   };
-  _sy_plugin_sample: {
+  _sy_plugin_cfbed?: {
+    [key: string]: any;
+  };
+  _sy_plugin_sample?: {
     [key: string]: any;
   };
 }
