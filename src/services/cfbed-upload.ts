@@ -1,5 +1,14 @@
 import type { CfBedConfig, ConfigTestResult } from '@/types/plugin'
 import { translate } from '@/utils/i18n'
+import {
+  createUploadTemplateContext,
+  getChunkThresholdMB,
+  resolveChunkSizeMB,
+  resolveCustomFileNameTemplate,
+  resolveUploadFolderTemplate,
+  supportsClientChunkUpload,
+  type UploadTemplateContext,
+} from '@/utils/upload-config'
 
 type UploadLogType = 'info' | 'success' | 'error'
 
@@ -7,6 +16,7 @@ type UploadOptions = {
   signal?: AbortSignal
   onProgress?: (percent: number) => void
   onLog?: (type: UploadLogType, message: string) => void
+  templateContext?: UploadTemplateContext
 }
 
 type UploadHttpError = Error & {
@@ -28,6 +38,38 @@ function buildHeaders(config: CfBedConfig) {
   if (config.token)
     headers.Authorization = `Bearer ${config.token}`
   return headers
+}
+
+function resolveRuntimeUpload(config: CfBedConfig, file: File, options: UploadOptions) {
+  const templateContext = options.templateContext || createUploadTemplateContext(file.name)
+  const runtimeConfig: CfBedConfig = {
+    ...config,
+    chunkSizeMB: resolveChunkSizeMB(config.uploadChannel, config.chunkSizeMB),
+  }
+
+  if (runtimeConfig.uploadFolder) {
+    runtimeConfig.uploadFolder = resolveUploadFolderTemplate(runtimeConfig.uploadFolder, templateContext)
+  }
+
+  let runtimeFile = file
+  if (runtimeConfig.uploadNameType === 'custom') {
+    runtimeFile = renameFile(file, resolveCustomFileNameTemplate(runtimeConfig.customFileNameTemplate, templateContext))
+    runtimeConfig.uploadNameType = 'origin'
+  }
+
+  return {
+    config: runtimeConfig,
+    file: runtimeFile,
+  }
+}
+
+function renameFile(file: File, nextName: string) {
+  if (!nextName || nextName === file.name)
+    return file
+  return new File([file], nextName, {
+    type: file.type,
+    lastModified: file.lastModified,
+  })
 }
 
 function buildBaseQuery(config: CfBedConfig) {
@@ -369,14 +411,15 @@ export async function uploadFileToCfBed(file: File, config: CfBedConfig, options
     throw new Error(translate('upload.error.hostMissing', '图床 host 未配置'))
   }
 
-  options.onLog?.('info', translate('upload.log.start', '开始上传：{name}', { name: file.name }))
+  const runtime = resolveRuntimeUpload(config, file, options)
+  options.onLog?.('info', translate('upload.log.start', '开始上传：{name}', { name: runtime.file.name }))
 
-  const chunkThreshold = Math.max(1, Number(config.chunkSizeMB || 20)) * 1024 * 1024
-  const shouldUseChunked = config.uploadChannel !== 'huggingface' && file.size > chunkThreshold
+  const chunkThreshold = getChunkThresholdMB(runtime.config.uploadChannel) * 1024 * 1024
+  const shouldUseChunked = supportsClientChunkUpload(runtime.config.uploadChannel) && runtime.file.size > chunkThreshold
 
   const uploadedUrl = shouldUseChunked
-    ? await uploadChunkedFile(file, config, options)
-    : await uploadSingleFile(file, config, options)
+    ? await uploadChunkedFile(runtime.file, runtime.config, options)
+    : await uploadSingleFile(runtime.file, runtime.config, options)
 
   options.onProgress?.(100)
   options.onLog?.('success', translate('upload.log.success', '上传成功：{url}', { url: uploadedUrl }))

@@ -476,14 +476,18 @@ export async function updateDocContent(docId: string, markdown: string): Promise
  */
 export async function getCurrentDocs(): Promise<DocInfo[]> {
   const currentDocId = await getCurrentDocId()
-  const currentMeta = await getDocNotebookAndPath(currentDocId)
+  return [await getDocInfoById(currentDocId)]
+}
 
-  return [{
-    id: currentDocId,
+export async function getDocInfoById(docId: string): Promise<DocInfo> {
+  const currentMeta = await getDocNotebookAndPath(docId)
+
+  return {
+    id: docId,
     path: currentMeta.path,
     hpath: currentMeta.hpath || '当前文档',
-    content: await getDocContent(currentDocId),
-  }]
+    content: await getDocContent(docId),
+  }
 }
 
 /**

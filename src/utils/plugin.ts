@@ -1,4 +1,5 @@
 import type { CfBedBridge, CfBedConfig, PluginSettings } from '@/types/plugin'
+import { DEFAULT_CUSTOM_FILE_NAME_TEMPLATE, normalizeTemplateString, resolveChunkSizeMB } from '@/utils/upload-config'
 
 export const CFBED_BRIDGE_KEY = '_sy_plugin_cfbed'
 export const CFBED_SETTINGS_STORAGE = 'settings.json'
@@ -20,10 +21,11 @@ export function createDefaultConfig(): CfBedConfig {
     channelName: '',
     uploadFolder: '',
     uploadNameType: 'default',
+    customFileNameTemplate: DEFAULT_CUSTOM_FILE_NAME_TEMPLATE,
     returnFormat: 'default',
     autoRetry: true,
     serverCompress: true,
-    chunkSizeMB: 20,
+    chunkSizeMB: 16,
     publicDomain: '',
     enabled: true,
   }
@@ -41,11 +43,23 @@ export function createDefaultSettings(): PluginSettings {
 }
 
 export function normalizeConfig(config?: Partial<CfBedConfig> | null): CfBedConfig {
+  const uploadChannel = config?.uploadChannel || 'telegram'
   return {
     ...createDefaultConfig(),
     ...config,
     id: config?.id || createConfigId(),
-    chunkSizeMB: Math.max(1, Number(config?.chunkSizeMB || 20)),
+    uploadFolder: normalizeTemplateString(String(config?.uploadFolder || '')),
+    uploadNameType: config?.uploadNameType === 'custom'
+      ? 'custom'
+      : config?.uploadNameType === 'index'
+        ? 'index'
+        : config?.uploadNameType === 'origin'
+          ? 'origin'
+          : config?.uploadNameType === 'short'
+            ? 'short'
+            : 'default',
+    customFileNameTemplate: normalizeTemplateString(String(config?.customFileNameTemplate || DEFAULT_CUSTOM_FILE_NAME_TEMPLATE)),
+    chunkSizeMB: resolveChunkSizeMB(uploadChannel, Number(config?.chunkSizeMB)),
   }
 }
 

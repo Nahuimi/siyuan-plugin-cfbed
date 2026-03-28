@@ -3,16 +3,9 @@ import { showMessage } from 'siyuan'
 import { pushErrMsg } from '@/api/index'
 import { usePlugin } from '@/main'
 import { canImageBeReplaced } from '@/utils/replace'
-import type { ImageItem, UploadLogFilter, UploadMappingItem } from '@/types/plugin'
+import type { ImageItem, UploadLogFilter, UploadLogItem, UploadMappingItem } from '@/types/plugin'
 import { useI18n } from '@/utils/i18n'
 import { CFBED_MAPPINGS_LEGACY_STORAGE, CFBED_MAPPINGS_STORAGE } from '@/utils/plugin'
-
-type UploadLogItem = {
-  id: string
-  type: 'info' | 'success' | 'error'
-  time: string
-  message: string
-}
 
 type UseUploadResultsOptions = {
   filteredImages: { value: ImageItem[] }

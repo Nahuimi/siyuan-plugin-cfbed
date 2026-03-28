@@ -7,13 +7,6 @@
     </div>
 
     <div class="cfbed-topbar__side">
-      <div class="cfbed-topbar__stats">
-        <span class="summary-badge">{{ t('panel.header.stats.images', '图片 {count}', { count: filteredCount }) }}</span>
-        <span class="summary-badge">{{ t('panel.header.stats.selected', '已选 {count}', { count: selectedCount }) }}</span>
-        <span class="summary-badge summary-badge--accent">{{ t('panel.header.stats.pending', '待迁移 {count}', { count: nonOwnCount }) }}</span>
-        <span class="summary-badge">{{ t('panel.header.stats.replaceable', '可替换 {count}', { count: replaceableCount }) }}</span>
-      </div>
-
       <div class="cfbed-topbar__controls">
         <SySelect
           class="topbar-select"
@@ -47,10 +40,6 @@ import { useI18n } from '@/utils/i18n'
 
 defineProps<{
   currentDocTitle: string
-  filteredCount: number
-  selectedCount: number
-  nonOwnCount: number
-  replaceableCount: number
   activeConfigId: string
   autoReplace: boolean
   themeButtonTitle: string

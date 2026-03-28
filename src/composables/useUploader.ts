@@ -1,26 +1,18 @@
 import { computed, ref } from 'vue'
 import { showMessage } from 'siyuan'
-import { pushErrMsg } from '@/api/index'
+import { getCurrentDocIdFromLayout, getDocInfoById, pushErrMsg } from '@/api/index'
 import { runWithConcurrency } from '@/services/async-pool'
 import { fetchFileFromImage, formatUploadError, uploadFileToCfBed } from '@/services/cfbed-upload'
 import { useI18n } from '@/utils/i18n'
 import { formatDateTime, formatTime } from '@/utils/time'
-import type { BatchUploadScope, CfBedConfig, ImageItem, PluginSettings, QueueUploadItem, UploadTaskSummary } from '@/types/plugin'
-
-type UploadLogType = 'info' | 'success' | 'error'
-
-type UploadLogItem = {
-  id: string
-  type: UploadLogType
-  time: string
-  message: string
-}
+import type { BatchUploadScope, CfBedConfig, ImageItem, PluginSettings, QueueUploadItem, UploadLogItem, UploadLogType, UploadTaskSummary } from '@/types/plugin'
+import { createUploadTemplateContext } from '@/utils/upload-config'
 
 type UseUploaderOptions = {
   settings: { value: PluginSettings }
   filteredImages: { value: ImageItem[] }
   activeConfig: () => CfBedConfig
-  refreshImages: () => Promise<void>
+  refreshImages: (docId?: string) => Promise<void>
   replaceUploadedLinks: (targetImages?: ImageItem[]) => Promise<void>
   patchImage: (id: string, patch: Partial<ImageItem>) => void
   addMapping?: (item: any) => void
@@ -68,6 +60,14 @@ export function useUploader(options: UseUploaderOptions) {
     }
   }
 
+  function removeUploadLog(id: string) {
+    uploadLogs.value = uploadLogs.value.filter(item => item.id !== id)
+  }
+
+  function clearUploadLogs() {
+    uploadLogs.value = []
+  }
+
   function createQueueItem(file: File): QueueUploadItem {
     return {
       id: `queue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -83,6 +83,20 @@ export function useUploader(options: UseUploaderOptions) {
 
   function getQueueSourceKey(file: File) {
     return `queue:${file.name}:${file.size}:${file.lastModified}`
+  }
+
+  async function resolveActiveNotePath() {
+    const currentDocId = getCurrentDocIdFromLayout()
+    if (!currentDocId)
+      return ''
+
+    try {
+      const doc = await getDocInfoById(currentDocId)
+      return doc.hpath
+    }
+    catch {
+      return ''
+    }
   }
 
   function appendFiles(files: File[]) {
@@ -239,7 +253,7 @@ export function useUploader(options: UseUploaderOptions) {
     addUploadLog('info', t('uploader.log.cancelImage', '已取消图片上传：{id}', { id: imageId }))
   }
 
-  async function uploadOneQueueItem(item: QueueUploadItem, config: CfBedConfig) {
+  async function uploadOneQueueItem(item: QueueUploadItem, config: CfBedConfig, noteFilePath = '') {
     const taskKey = makeTaskKey('queue', item.id)
     const controller = new AbortController()
     runningControllers.set(taskKey, controller)
@@ -255,6 +269,7 @@ export function useUploader(options: UseUploaderOptions) {
       const uploadedUrl = await uploadFileToCfBed(item.file, config, {
         onLog: addUploadLog,
         signal: controller.signal,
+        templateContext: createUploadTemplateContext(item.file.name, noteFilePath),
         onProgress: (percent) => {
           patchQueueItem(item.id, {
             status: 'uploading',
@@ -335,6 +350,7 @@ export function useUploader(options: UseUploaderOptions) {
 
     queueUploading.value = true
     queueSuccessCount.value = 0
+    const noteFilePath = await resolveActiveNotePath()
 
     const reusedQueueIds = reuseQueueMappings(pendingItems)
     const uploadItems = pendingItems.filter(item => !reusedQueueIds.has(item.id))
@@ -349,7 +365,7 @@ export function useUploader(options: UseUploaderOptions) {
 
     try {
       await runWithConcurrency(uploadItems, uploadConcurrency.value, async (item) => {
-        await uploadOneQueueItem(item, config)
+        await uploadOneQueueItem(item, config, noteFilePath)
       })
 
       showMessage(t('uploader.message.uploadComplete', '上传完成：{done}/{total}', {
@@ -379,7 +395,7 @@ export function useUploader(options: UseUploaderOptions) {
     if (!config)
       return
 
-    await uploadOneQueueItem(target, config)
+    await uploadOneQueueItem(target, config, await resolveActiveNotePath())
   }
 
   async function uploadOneImage(item: ImageItem, config: CfBedConfig) {
@@ -407,6 +423,7 @@ export function useUploader(options: UseUploaderOptions) {
       const uploadedUrl = await uploadFileToCfBed(file, config, {
         onLog: addUploadLog,
         signal: controller.signal,
+        templateContext: createUploadTemplateContext(file.name, item.docs[0]?.docHPath || item.docs[0]?.docPath || ''),
         onProgress: (percent) => {
           options.patchImage(item.id, {
             status: 'uploading',
@@ -482,8 +499,18 @@ export function useUploader(options: UseUploaderOptions) {
     })
   }
 
-  async function uploadSelectedByScope(scope: BatchUploadScope = 'all') {
-    const selected = filterImagesByScope(scope)
+  function normalizeUploadTargets(targetImages: ImageItem[]) {
+    const nextTargets = targetImages
+      .map(item => options.filteredImages.value.find(current => current.id === item.id || current.url === item.url) || item)
+      .filter(item => item.sourceType !== 'own')
+
+    return nextTargets.filter((item, index) =>
+      nextTargets.findIndex(current => current.id === item.id || current.url === item.url) === index,
+    )
+  }
+
+  async function uploadImages(targetImages: ImageItem[]) {
+    const selected = normalizeUploadTargets(targetImages)
     if (!selected.length) {
       pushErrMsg(t('uploader.error.noImagesForScope', '没有符合条件的图片可上传'))
       return
@@ -525,6 +552,11 @@ export function useUploader(options: UseUploaderOptions) {
       imageUploading.value = false
       imageSuccessCount.value = 0
     }
+  }
+
+  async function uploadSelectedByScope(scope: BatchUploadScope = 'all') {
+    const selected = filterImagesByScope(scope)
+    await uploadImages(selected)
   }
 
   async function uploadSelected() {
@@ -607,13 +639,14 @@ export function useUploader(options: UseUploaderOptions) {
 
     queueUploading.value = true
     queueSuccessCount.value = 0
+    const noteFilePath = await resolveActiveNotePath()
 
     const reusedQueueIds = reuseQueueMappings(failed)
     const retryItems = failed.filter(item => !reusedQueueIds.has(item.id))
 
     try {
       await runWithConcurrency(retryItems, uploadConcurrency.value, async (item) => {
-        await uploadOneQueueItem(item, config)
+        await uploadOneQueueItem(item, config, noteFilePath)
       })
 
       showMessage(t('uploader.message.retryComplete', '重试完成：{done}/{total}', {
@@ -684,6 +717,7 @@ export function useUploader(options: UseUploaderOptions) {
     uploadQueuedFiles,
     uploadSelected,
     uploadSelectedByScope,
+    uploadImages,
     retryImage,
     retryFailedImages,
     retryQueueItem,
@@ -691,5 +725,7 @@ export function useUploader(options: UseUploaderOptions) {
     cancelAllUploads,
     cancelImageUpload,
     cancelQueueUpload,
+    removeUploadLog,
+    clearUploadLogs,
   }
 }

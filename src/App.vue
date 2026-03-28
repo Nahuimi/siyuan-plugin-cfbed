@@ -3,10 +3,6 @@
     <div class="cfbed-shell" :data-theme="resolvedThemeMode">
       <PanelHeader
         :current-doc-title="currentDocTitle"
-        :filtered-count="filteredImages.length"
-        :selected-count="selectedCount"
-        :non-own-count="nonOwnCount"
-        :replaceable-count="replaceableCount"
         :active-config-id="settings.activeConfigId"
         :auto-replace="settings.autoReplace"
         :theme-button-title="themeButtonTitle"
@@ -80,6 +76,8 @@
             @cancel-item="cancelQueueUpload"
             @update:log-filter="uploadLogFilter = $event"
             @update:concurrency="uploadConcurrency = Math.max(1, Math.min(10, $event || 1))"
+            @remove-log="removeUploadLog"
+            @clear-logs="clearUploadLogs"
           />
 
           <MiscPanel
@@ -99,6 +97,7 @@
               :images="displayImages"
               :selected-count="selectedCount"
               :non-own-count="nonOwnCount"
+              :replaceable-count="replaceableCount"
               :filters="filters"
               :replace-preview-active="replacePreviewActive"
               @toggle-select="toggleSelectVisible"
@@ -107,8 +106,6 @@
               @cancel="cancelImageUpload"
               @confirm-replace="confirmSingleReplace"
               @cancel-replace="cancelSingleReplace"
-              @retry-failed="retryFailedImages"
-              @upload-scope="uploadSelectedByScope"
             />
           </template>
         </div>
@@ -119,6 +116,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { IProtyle } from 'siyuan'
 import PanelHeader from '@/components/cfbed/PanelHeader.vue'
 import PanelSidebar from '@/components/cfbed/PanelSidebar.vue'
 import ImagePanel from '@/components/cfbed/ImagePanel.vue'
@@ -126,13 +124,15 @@ import MiscPanel from '@/components/cfbed/MiscPanel.vue'
 import SettingsPanel from '@/components/cfbed/SettingsPanel.vue'
 import TaskCenter from '@/components/cfbed/TaskCenter.vue'
 import UploadPanel from '@/components/cfbed/UploadPanel.vue'
-import { pushErrMsg } from '@/api/index'
+import { getCurrentDocIdFromLayout, getEditableDocContent, pushErrMsg } from '@/api/index'
 import { useCfBedSettings } from '@/composables/useCfBedSettings'
 import { useImageScanner } from '@/composables/useImageScanner'
 import { usePanelShell } from '@/composables/usePanelShell'
 import { useUploadResults } from '@/composables/useUploadResults'
 import { useUploader } from '@/composables/useUploader'
+import { usePlugin } from '@/main'
 import { useI18n } from '@/utils/i18n'
+import { extractMarkdownImages, isLocalAsset } from '@/utils/image'
 import { canImageBeReplaced } from '@/utils/replace'
 import { setCfBedBridge } from '@/utils/plugin'
 import type { PanelTab, ThemeMode } from '@/types/plugin'
@@ -142,6 +142,7 @@ import '@/styles/cfbed-app.scss'
 const panelVisible = ref(false)
 const activeTab = ref<PanelTab>('images')
 const systemPrefersDark = ref(window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? true)
+const plugin = usePlugin()
 const { t } = useI18n()
 
 const {
@@ -157,6 +158,7 @@ const {
 
 const {
   currentDocTitle,
+  images,
   filters,
   filteredImages,
   selectedCount,
@@ -203,6 +205,7 @@ const {
   clearUploadQueue,
   uploadQueuedFiles,
   uploadSelectedByScope,
+  uploadImages,
   retryImage,
   retryFailedImages,
   retryQueueItem,
@@ -210,6 +213,8 @@ const {
   cancelAllUploads,
   cancelImageUpload,
   cancelQueueUpload,
+  removeUploadLog,
+  clearUploadLogs,
 } = useUploader({
   settings,
   filteredImages,
@@ -243,9 +248,232 @@ const selectedUploadableCount = computed(() =>
 )
 
 let mediaQuery: MediaQueryList | null = null
+let autoReplaceSequence = 0
+const autoReplaceTokens = new Map<string, number>()
+
+type PasteEventDetail = {
+  protyle?: IProtyle
+  files?: FileList | DataTransferItemList | string[]
+  localFiles?: Array<{ path: string, size: number }>
+}
 
 function handleThemeMediaChange(event: MediaQueryListEvent) {
   systemPrefersDark.value = event.matches
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+function normalizeFileName(value: string) {
+  const raw = String(value || '').split(/[\\/]/).pop() || ''
+  if (!raw)
+    return ''
+
+  try {
+    return decodeURIComponent(raw).toLowerCase()
+  }
+  catch {
+    return raw.toLowerCase()
+  }
+}
+
+function isImagePathLike(value: string) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(String(value || ''))
+}
+
+function collectExpectedFileNames(detail: Pick<PasteEventDetail, 'files' | 'localFiles'> | DragEvent) {
+  const names = new Set<string>()
+
+  if ('localFiles' in detail && Array.isArray(detail.localFiles)) {
+    for (const item of detail.localFiles) {
+      if (!isImagePathLike(item?.path || ''))
+        continue
+      const fileName = normalizeFileName(item.path)
+      if (fileName)
+        names.add(fileName)
+    }
+  }
+
+  const maybeFiles = 'files' in detail
+    ? detail.files
+    : detail.dataTransfer?.files
+
+  if (!maybeFiles)
+    return names
+
+  if (typeof FileList !== 'undefined' && maybeFiles instanceof FileList) {
+    for (const file of Array.from(maybeFiles)) {
+      if (!file.type.startsWith('image/') && !isImagePathLike(file.name))
+        continue
+      const fileName = normalizeFileName(file.name)
+      if (fileName)
+        names.add(fileName)
+    }
+    return names
+  }
+
+  if (typeof DataTransferItemList !== 'undefined' && maybeFiles instanceof DataTransferItemList) {
+    for (const item of Array.from(maybeFiles)) {
+      if (item.kind !== 'file' || (!item.type.startsWith('image/') && !isImagePathLike(item.type)))
+        continue
+      const file = item.getAsFile()
+      const fileName = normalizeFileName(file?.name || item.type)
+      if (fileName)
+        names.add(fileName)
+    }
+    return names
+  }
+
+  if (Array.isArray(maybeFiles)) {
+    for (const item of maybeFiles) {
+      if (typeof item !== 'string' || !isImagePathLike(item))
+        continue
+      const fileName = normalizeFileName(item)
+      if (fileName)
+        names.add(fileName)
+    }
+  }
+
+  return names
+}
+
+function hasImagePayload(detail: Pick<PasteEventDetail, 'files' | 'localFiles'> | DragEvent) {
+  if (collectExpectedFileNames(detail).size > 0)
+    return true
+
+  const maybeFiles = 'files' in detail
+    ? detail.files
+    : detail.dataTransfer?.files
+
+  if (!maybeFiles)
+    return false
+
+  if (typeof FileList !== 'undefined' && maybeFiles instanceof FileList) {
+    return Array.from(maybeFiles).some(file => file.type.startsWith('image/'))
+  }
+
+  if (typeof DataTransferItemList !== 'undefined' && maybeFiles instanceof DataTransferItemList) {
+    return Array.from(maybeFiles).some(item => item.kind === 'file' && item.type.startsWith('image/'))
+  }
+
+  return false
+}
+
+function resolveDocIdFromProtyle(protyle?: IProtyle | null) {
+  return protyle?.block?.rootID || protyle?.options?.rootId || ''
+}
+
+function resolveDocIdFromDropTarget(target: EventTarget | null) {
+  if (!(target instanceof Element))
+    return ''
+
+  const protyleElement = target.closest('.protyle')
+  if (!protyleElement)
+    return ''
+
+  const docElement = protyleElement.querySelector('.protyle-background[data-node-id]') as HTMLElement | null
+  return docElement?.getAttribute('data-node-id') || ''
+}
+
+async function readLocalAssetUrls(docId: string) {
+  const content = await getEditableDocContent(docId)
+  return extractMarkdownImages(content).filter(isLocalAsset)
+}
+
+function pickCandidateLocalUrls(beforeUrls: string[], afterUrls: string[], expectedFileNames: Set<string>) {
+  const beforeSet = new Set(beforeUrls)
+  const addedUrls = afterUrls.filter(url => !beforeSet.has(url))
+  if (addedUrls.length) {
+    return Array.from(new Set(addedUrls))
+  }
+
+  if (!expectedFileNames.size)
+    return []
+
+  return Array.from(new Set(afterUrls.filter(url => expectedFileNames.has(normalizeFileName(url)))))
+}
+
+async function queueAutoReplaceForDoc(docId: string, expectedFileNames: Set<string>) {
+  if (!settings.value.autoReplace || !docId)
+    return
+
+  const token = ++autoReplaceSequence
+  autoReplaceTokens.set(docId, token)
+
+  try {
+    const beforeUrls = await readLocalAssetUrls(docId).catch(() => [] as string[])
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(attempt === 0 ? 240 : 420)
+
+      if (autoReplaceTokens.get(docId) !== token)
+        return
+
+      const afterUrls = await readLocalAssetUrls(docId).catch(() => [] as string[])
+      const candidateUrls = pickCandidateLocalUrls(beforeUrls, afterUrls, expectedFileNames)
+      if (!candidateUrls.length)
+        continue
+
+      await refreshImages(docId)
+
+      const matchedImages = images.value.filter(item =>
+        candidateUrls.includes(item.url)
+        && item.sourceType === 'local'
+        && item.docs.some(doc => doc.docId === docId),
+      )
+
+      if (!matchedImages.length)
+        continue
+
+      const mappedImages = matchedImages.filter(item => item.uploadedUrl && item.status === 'success')
+      if (mappedImages.length) {
+        await replaceUploadedLinks(mappedImages)
+        await refreshImages(docId)
+        return
+      }
+
+      if (imageUploading.value)
+        continue
+
+      const pendingImages = matchedImages.filter(item => !item.uploadedUrl && item.status !== 'success')
+      if (!pendingImages.length)
+        continue
+
+      await uploadImages(pendingImages)
+      await refreshImages(docId)
+      return
+    }
+  }
+  catch (error: any) {
+    pushErrMsg(error?.message || t('autoReplace.failed', '自动上传替换失败'))
+  }
+  finally {
+    if (autoReplaceTokens.get(docId) === token)
+      autoReplaceTokens.delete(docId)
+  }
+}
+
+function handleAutoReplacePaste(event: CustomEvent<PasteEventDetail>) {
+  if (!settings.value.autoReplace || !hasImagePayload(event.detail))
+    return
+
+  const docId = resolveDocIdFromProtyle(event.detail.protyle) || getCurrentDocIdFromLayout()
+  if (!docId)
+    return
+
+  void queueAutoReplaceForDoc(docId, collectExpectedFileNames(event.detail))
+}
+
+function handleAutoReplaceDrop(event: DragEvent) {
+  if (!settings.value.autoReplace || !hasImagePayload(event))
+    return
+
+  const docId = resolveDocIdFromDropTarget(event.target) || getCurrentDocIdFromLayout()
+  if (!docId)
+    return
+
+  void queueAutoReplaceForDoc(docId, collectExpectedFileNames(event))
 }
 
 function updateActiveConfig(value: string) {
@@ -330,6 +558,9 @@ function cancelReplacePreview() {
 }
 
 onMounted(() => {
+  plugin.eventBus.on('paste', handleAutoReplacePaste)
+  document.addEventListener('drop', handleAutoReplaceDrop, true)
+
   mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
   if (mediaQuery) {
     systemPrefersDark.value = mediaQuery.matches
@@ -359,6 +590,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  plugin.eventBus.off('paste', handleAutoReplacePaste)
+  document.removeEventListener('drop', handleAutoReplaceDrop, true)
+
   setCfBedBridge()
   void flushSettings().catch(() => {})
   void flushMappings().catch(() => {})

@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { getCurrentDocs, getEditableDocContent, pushErrMsg, queryAssetReferencesBatch, updateDocContent } from '@/api/index'
+import { getCurrentDocs, getDocInfoById, getEditableDocContent, pushErrMsg, queryAssetReferencesBatch, updateDocContent } from '@/api/index'
 import { useI18n } from '@/utils/i18n'
 import { extractMarkdownImages, detectImageSourceType, getDomainFromUrl, isImageLikeUrl } from '@/utils/image'
 import { canImageBeReplaced, replaceAllOccurrences } from '@/utils/replace'
@@ -53,12 +53,14 @@ export function useImageScanner(
     filteredImages.value.filter(item => item.sourceType !== 'own').length,
   )
 
-  async function refreshImages() {
+  async function refreshImages(docId?: string) {
     const currentVersion = ++refreshVersion
     const previousImageMap = new Map(images.value.map(item => [item.url, item]))
 
     try {
-      const docs = await getCurrentDocs()
+      const docs = docId
+        ? [await getDocInfoById(docId)]
+        : await getCurrentDocs()
 
       if (currentVersion !== refreshVersion)
         return
@@ -209,6 +211,7 @@ export function useImageScanner(
 
   return {
     currentDocTitle,
+    images,
     filters,
     filteredImages,
     selectedCount,

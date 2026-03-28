@@ -84,7 +84,7 @@
 
           <label class="field field-row">
             <span class="field-row__label">{{ t('common.uploadChannel', '上传渠道') }}</span>
-            <SySelect class="field-row__control" :model-value="config.uploadChannel" :options="uploadChannelOptions" @update:modelValue="updateField('uploadChannel', $event)" />
+            <SySelect class="field-row__control" :model-value="config.uploadChannel" :options="uploadChannelOptions" @update:modelValue="handleUploadChannelChange" />
           </label>
 
           <label class="field field-row">
@@ -118,7 +118,16 @@
 
           <label class="field field-row">
             <span class="field-row__label">{{ t('config.field.uploadNameType', '命名方式') }}</span>
-            <SySelect class="field-row__control" :model-value="config.uploadNameType" :options="uploadNameTypeOptions" @update:modelValue="updateField('uploadNameType', $event)" />
+            <SySelect class="field-row__control" :model-value="config.uploadNameType" :options="uploadNameTypeOptions" @update:modelValue="handleUploadNameTypeChange" />
+          </label>
+
+          <label v-if="config.uploadNameType === 'custom'" class="field field-row">
+            <span class="field-row__label">{{ t('config.field.customFileNameTemplate', '自定义文件名模板') }}</span>
+            <SyInput
+              class="field-row__control"
+              :model-value="config.customFileNameTemplate"
+              @update:modelValue="updateField('customFileNameTemplate', $event)"
+            />
           </label>
 
           <label class="field field-row">
@@ -126,6 +135,7 @@
             <SySelect class="field-row__control" :model-value="config.returnFormat" :options="returnFormatOptions" @update:modelValue="updateField('returnFormat', $event)" />
           </label>
         </div>
+
       </section>
 
       <section class="config-section">
@@ -138,6 +148,7 @@
           <label v-if="showChunkSize" class="field field-row">
             <span class="field-row__label">{{ t('config.field.chunkSize', '分块大小（MB）') }}</span>
             <SyInput class="field-row__control" :model-value="config.chunkSizeMB" type="number" min="1" @update:modelValue="updateField('chunkSizeMB', Number($event))" />
+            <span class="minor-text">{{ t('config.chunkRule.sizeHint', '{channel} 默认分块大小 {size}MB', { channel: uploadChannelLabel(config.uploadChannel), size: defaultChunkSizeMB }) }}</span>
           </label>
         </div>
 
@@ -153,7 +164,7 @@
           </button>
 
           <div v-if="!showChunkSize" class="config-channel-note">
-            {{ t('config.huggingFace.chunkNote', 'Hugging Face 渠道由服务端处理大文件，无需客户端分块。') }}
+            {{ chunkNoteText }}
           </div>
         </div>
       </section>
@@ -181,6 +192,12 @@ import SySelect from '@/components/SiyuanTheme/SySelect.vue'
 import { testCfBedConfig } from '@/services/cfbed-upload'
 import type { CfBedConfig, ConfigTestResult } from '@/types/plugin'
 import { useI18n } from '@/utils/i18n'
+import {
+  DEFAULT_CUSTOM_FILE_NAME_TEMPLATE,
+  getChunkThresholdMB,
+  getDefaultChunkSizeMB,
+  supportsClientChunkUpload,
+} from '@/utils/upload-config'
 
 const props = defineProps<{
   config: CfBedConfig
@@ -209,6 +226,7 @@ const uploadNameTypeOptions = computed(() => [
   { value: 'index', text: t('config.option.uploadName.index', '仅前缀') },
   { value: 'origin', text: t('config.option.uploadName.origin', '仅原名') },
   { value: 'short', text: t('config.option.uploadName.short', '短链接') },
+  { value: 'custom', text: t('config.option.uploadName.custom', '自定义模板') },
 ])
 
 const returnFormatOptions = computed(() => [
@@ -216,8 +234,10 @@ const returnFormatOptions = computed(() => [
   { value: 'full', text: t('config.option.returnFormat.full', '完整链接') },
 ])
 
-const showChunkSize = computed(() => props.config.uploadChannel !== 'huggingface')
+const showChunkSize = computed(() => supportsClientChunkUpload(props.config.uploadChannel))
 const showServerCompress = computed(() => props.config.uploadChannel === 'telegram')
+const defaultChunkSizeMB = computed(() => getDefaultChunkSizeMB(props.config.uploadChannel))
+const chunkThresholdMB = computed(() => getChunkThresholdMB(props.config.uploadChannel))
 const authModeLabel = computed(() => {
   if (props.config.token)
     return 'Bearer Token'
@@ -228,12 +248,22 @@ const authModeLabel = computed(() => {
 const publicBaseUrl = computed(() => props.config.publicDomain || props.config.host || t('common.unconfigured', '未配置'))
 const uploadStrategyLabel = computed(() => {
   const labels = [uploadChannelLabel(props.config.uploadChannel)]
-  if (showChunkSize.value)
-    labels.push(t('config.uploadStrategy.chunked', '超过 {size}MB 分块上传', { size: props.config.chunkSizeMB }))
+  if (showChunkSize.value) {
+    labels.push(t('config.uploadStrategy.chunkedRule', '{threshold}MB 以上分块 / 默认 {size}MB', {
+      threshold: chunkThresholdMB.value,
+      size: props.config.chunkSizeMB,
+    }))
+  }
+  else {
+    labels.push(t('config.uploadStrategy.direct', '默认直传'))
+  }
   if (props.config.autoRetry)
     labels.push(t('config.uploadStrategy.autoRetry', '失败自动重试'))
   return labels.join(' / ')
 })
+const chunkNoteText = computed(() => props.config.uploadChannel === 'huggingface'
+  ? t('config.huggingFace.chunkNote', 'Hugging Face 渠道由服务端处理大文件，无需客户端分块。')
+  : t('config.chunkNote.direct', '当前渠道默认不启用客户端分块。'))
 const configWarnings = computed(() => {
   const warnings: string[] = []
 
@@ -280,6 +310,27 @@ async function handleTest() {
   }
   finally {
     testing.value = false
+  }
+}
+
+function handleUploadNameTypeChange(value: string) {
+  updateField('uploadNameType', value)
+  if (value === 'custom' && !props.config.customFileNameTemplate) {
+    updateField('customFileNameTemplate', DEFAULT_CUSTOM_FILE_NAME_TEMPLATE)
+  }
+}
+
+function handleUploadChannelChange(value: string) {
+  const previousChannel = props.config.uploadChannel
+  const previousChunkSize = props.config.chunkSizeMB
+  updateField('uploadChannel', value)
+
+  if (!supportsClientChunkUpload(value as CfBedConfig['uploadChannel']))
+    return
+
+  const previousDefaultSizes = new Set([20, getDefaultChunkSizeMB(previousChannel)])
+  if (previousDefaultSizes.has(previousChunkSize)) {
+    updateField('chunkSizeMB', getDefaultChunkSizeMB(value as CfBedConfig['uploadChannel']))
   }
 }
 

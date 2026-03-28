@@ -12,6 +12,7 @@ export type UploadStatus =
 export type BatchUploadScope = 'all' | 'local' | 'external'
 
 export type UploadLogFilter = 'all' | 'info' | 'success' | 'error'
+export type UploadLogType = 'info' | 'success' | 'error'
 
 export type PanelTab = 'images' | 'settings' | 'upload' | 'misc'
 export type ThemeMode = 'auto' | 'light' | 'dark'
@@ -68,7 +69,8 @@ export interface CfBedConfig {
   uploadChannel: 'telegram' | 'cfr2' | 's3' | 'discord' | 'huggingface'
   channelName: string
   uploadFolder: string
-  uploadNameType: 'default' | 'index' | 'origin' | 'short'
+  uploadNameType: 'default' | 'index' | 'origin' | 'short' | 'custom'
+  customFileNameTemplate: string
   returnFormat: 'default' | 'full'
   autoRetry: boolean
   serverCompress: boolean
@@ -86,6 +88,13 @@ export interface QueueUploadItem {
   progress: number
   message: string
   uploadedUrl: string
+}
+
+export interface UploadLogItem {
+  id: string
+  type: UploadLogType
+  time: string
+  message: string
 }
 
 export interface PluginSettings {
